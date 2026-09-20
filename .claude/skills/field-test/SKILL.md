@@ -39,10 +39,12 @@ The machine needs two things, from two places:
 Then, in this order — each step depends on the one before:
 
 ```powershell
-# 1. install: clears the mark of the web, sets up PATH
+# 1. install: clears the mark of the web, sets up PATH, and (one UAC prompt) writes the
+#    Openness approval and group membership
 powershell -ExecutionPolicy Bypass -File install.ps1
 
-# 2. answer the Openness dialog once, in the foreground, against a portal on screen
+# 2. confirm Openness works, in the foreground, against a portal on screen - and answer the
+#    approval dialog here if install's UAC step was declined or skipped
 tia devices --no-daemon
 
 # 3. now the harness

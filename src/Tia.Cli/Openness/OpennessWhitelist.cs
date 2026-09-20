@@ -85,6 +85,8 @@ namespace TiaCli.Openness
         public const string PendingApprovalNotice =
             "TIA Portal has not approved this build of tia.exe for Openness access yet. It will show " +
             "an 'Openness access' window and wait until you answer it - look for that window if this " +
-            "seems to hang. Approval is remembered until tia.exe is rebuilt.";
+            "seems to hang, and note that a background session has nowhere to show it. Running " +
+            "repair.ps1 from the install folder writes the approval directly and no window appears " +
+            "at all. Either way it is remembered until tia.exe is replaced.";
     }
 }

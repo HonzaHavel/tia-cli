@@ -3,18 +3,33 @@
     Installs tia-cli for the current user.
 
 .DESCRIPTION
-    Copies the tool to a stable folder and puts it on your PATH. No administrator rights are
-    needed: everything lands under your own profile and only HKCU is written.
+    Copies the tool to a stable folder and puts it on your PATH, then does the machine-wide part
+    that decides whether tia can talk to TIA Portal at all: it writes the Openness whitelist entry
+    for this exact tia.exe, adds you to the Siemens TIA Openness group if you are not in it, and
+    clears a machine-wide forced-elevation flag. That part needs an administrator, so from a normal
+    prompt it asks once through UAC; from an elevated prompt it just runs. It is repair.ps1 doing
+    the work, which install leaves next to tia.exe for later.
+
+    Without that step, every install and every upgrade - which changes the exe's hash - leaves tia
+    unapproved, and the first background session times out against an approval window nobody sees.
 
     The install folder matters more than it looks. TIA Portal's Openness whitelist records the
     approved exe's path *and* a hash of its bytes, so a tool that moves between runs asks for
     approval again every time. Installing to one fixed place and leaving it there is the point.
 
 .PARAMETER InstallDir
-    Where to install. Defaults to %LOCALAPPDATA%\Programs\tia-cli.
+    Where to install. Defaults to %LOCALAPPDATA%\Programs\tia-cli. Anywhere works, and so does
+    running this script from anywhere - unpack the zip where you like. What matters is that the
+    installed folder stays put afterwards, since the approval is bound to the exe's path. repair.ps1
+    and uninstall.ps1 are copied in beside tia.exe and act on the folder they are in, so a
+    non-default install needs no arguments later either.
 
 .PARAMETER NoPath
     Skip the PATH change. You will have to call tia.exe by its full path.
+
+.PARAMETER NoElevate
+    Skip the machine-wide step and stay inside your own profile. You then answer TIA Portal's
+    approval window yourself, or run repair.ps1 later.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File install.ps1
@@ -22,7 +37,8 @@
 [CmdletBinding()]
 param(
     [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'Programs\tia-cli'),
-    [switch]$NoPath
+    [switch]$NoPath,
+    [switch]$NoElevate
 )
 
 $ErrorActionPreference = 'Stop'
@@ -95,6 +111,8 @@ try {
 
 if ($inGroup) {
     Write-Step 'Your account is in the Siemens TIA Openness group'
+} elseif (-not $NoElevate) {
+    Write-Step 'Your account is not in the Siemens TIA Openness group yet - the machine-wide step adds it'
 } else {
     Write-Warn 'Your account is not in the local "Siemens TIA Openness" group, so Openness calls will'
     Write-Warn 'fail with access_denied. Add it, then sign out and back in - membership is read at logon.'
@@ -165,8 +183,9 @@ if (Test-Path $layers) {
     }
 }
 
+# The machine-wide step clears the HKLM one itself; this report is for when it is skipped.
 $machineLayers = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers'
-if (Test-Path $machineLayers) {
+if ($NoElevate -and (Test-Path $machineLayers)) {
     $machineProps = Get-ItemProperty -Path $machineLayers
     foreach ($name in $machineProps.PSObject.Properties.Name) {
         if ($name -notlike '*\tia.exe') { continue }
@@ -192,6 +211,73 @@ if (-not $NoPath) {
         $updated = (@($entries) + $InstallDir) -join ';'
         Set-UserPathRaw $updated
         Write-Step 'Added to your user PATH'
+    }
+}
+
+# ---------------------------------------------------------------- machine-wide
+# The Openness whitelist and the Siemens group are both machine state, so this is the one part that
+# needs an administrator. repair.ps1 does it; everything is passed in explicitly because an elevated
+# process may belong to a different administrator, whose LOCALAPPDATA and USERNAME are not ours.
+$repair = Join-Path $InstallDir 'repair.ps1'
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$machineDone = $false
+$repairCmd = "powershell -ExecutionPolicy Bypass -File `"$repair`" -AddToGroup"
+
+if ($NoElevate) {
+    # reported with the next steps below
+} elseif (-not (Test-Path $repair)) {
+    Write-Warn 'repair.ps1 is not in the zip, so the machine-wide step was skipped.'
+} else {
+    Write-Host ''
+    Write-Host 'Machine-wide setup: Openness approval and group membership'
+
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+        ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    if ($isAdmin) {
+        & $repair -ExePath $exe -User $me -AddToGroup -NoNextSteps
+        $machineDone = $LASTEXITCODE -eq 0
+    } else {
+        Write-Step 'This needs administrator rights - answer the UAC prompt.'
+
+        function Quote($s) { "'" + ($s -replace "'", "''") + "'" }
+        $log = Join-Path $env:TEMP "tia-cli-install-$PID.log"
+        # The elevated window is hidden and gone when it finishes, so its output comes back through
+        # a file. Write-Host is the information stream, which *>&1 catches along with the rest.
+        $child = @"
+try {
+    & $(Quote $repair) -ExePath $(Quote $exe) -User $(Quote $me) -AddToGroup -NoNextSteps *>&1 |
+        Out-File -LiteralPath $(Quote $log) -Encoding utf8
+    exit `$LASTEXITCODE
+} catch {
+    `$_ | Out-String | Out-File -LiteralPath $(Quote $log) -Encoding utf8 -Append
+    exit 1
+}
+"@
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($child))
+
+        # A 32-bit PowerShell would start a 32-bit child, which writes the whitelist into the
+        # Wow6432Node view where tia never looks. Sysnative exists only for 32-bit callers.
+        $powershell = Join-Path $env:SystemRoot 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
+        if (-not (Test-Path $powershell)) {
+            $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        }
+
+        try {
+            $proc = Start-Process -FilePath $powershell -Verb RunAs -WindowStyle Hidden -Wait -PassThru `
+                -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded)
+            if (Test-Path $log) {
+                Get-Content -LiteralPath $log | ForEach-Object { Write-Host "  $_" }
+                Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+            }
+            $machineDone = $proc.ExitCode -eq 0
+        } catch {
+            Write-Warn 'The UAC prompt was declined, so the machine-wide step did not run.'
+        }
+    }
+
+    if (-not $machineDone) {
+        Write-Warn 'Machine-wide setup did not finish. tia is installed, but may not be approved yet.'
     }
 }
 
@@ -227,7 +313,12 @@ try {
 } catch { }
 
 if ($approved) {
-    Write-Host '  TIA Portal has already approved this exact file for Openness access.'
+    Write-Host '  TIA Portal has approved this exact file for Openness access.'
+    if (-not $inGroup) {
+        Write-Host ''
+        Write-Host '  Sign out of Windows and back in before using tia: group membership is read at logon,' -ForegroundColor Yellow
+        Write-Host '  so until then every command fails with access_denied (exit 7).' -ForegroundColor Yellow
+    }
 } else {
     Write-Host '  Before anything else, run one command in the foreground, against a TIA Portal you'
     Write-Host '  have open on screen:'
@@ -241,9 +332,13 @@ if ($approved) {
     Write-Host '  that window has nowhere to appear and the call times out as an access error instead.'
 }
 Write-Host ''
-Write-Host '  If the daemon will not start, or that window never appears, run repair.ps1 from an'
-Write-Host '  elevated prompt - it re-checks all of the above and writes the approval entry itself:'
-Write-Host "    powershell -ExecutionPolicy Bypass -File `"$(Join-Path $InstallDir 'repair.ps1')`""
+if (-not $approved) {
+    Write-Host '  Or skip the window: repair.ps1 writes the approval itself (it asks for UAC):'
+    Write-Host "    $repairCmd"
+    Write-Host ''
+}
+Write-Host '  If the daemon will not start, repair.ps1 is also the place to look - it re-checks all of'
+Write-Host '  the above. -DryRun reports without changing anything.'
 Write-Host ''
 Write-Host "  To remove: powershell -ExecutionPolicy Bypass -File `"$(Join-Path $InstallDir 'uninstall.ps1')`""
 Write-Host ''

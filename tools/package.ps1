@@ -85,8 +85,10 @@ To install, from this folder:
 
     powershell -ExecutionPolicy Bypass -File install.ps1
 
-That copies the tool to %LOCALAPPDATA%\Programs\tia-cli and puts it on your PATH. No administrator
-rights are needed. Open a new terminal afterwards, then run 'tia help'.
+That copies the tool to %LOCALAPPDATA%\Programs\tia-cli, puts it on your PATH, and then asks once
+for administrator rights (UAC) to approve tia.exe for TIA Portal Openness and add you to the
+Siemens TIA Openness group. Run it again after every upgrade - approval follows the exe's bytes.
+Open a new terminal afterwards, then run 'tia help'.
 
 To remove it later:
 

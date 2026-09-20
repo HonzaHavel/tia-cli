@@ -88,10 +88,27 @@ find out one failed command at a time. It also clears the two things that stop a
 from working at all: the mark of the web the zip carries, and any forced-elevation flag on
 `tia.exe`. Both make the daemon's launch fail as "the operation was canceled by the user" about
 something nobody was asked; see [Why the daemon might not start](#why-the-daemon-might-not-start). Then it copies the tool to `%LOCALAPPDATA%\Programs\tia-cli`
-and puts that on your user PATH. Nothing needs administrator rights and nothing outside your profile
-is written. Open a new terminal afterwards, since the one you ran it from still has the old PATH.
+and puts that on your user PATH. Open a new terminal afterwards, since the one you ran it from still
+has the old PATH.
 
-`-InstallDir <path>` puts it somewhere else, `-NoPath` leaves your PATH alone. Installing over an
+Last, it does the machine-wide part that decides whether `tia` can reach TIA Portal at all: it
+writes the Openness whitelist entry for this exact `tia.exe`, adds you to the Siemens TIA Openness
+group if you are missing from it, and clears a machine-wide forced-elevation flag. That needs an
+administrator, so from a normal prompt it asks once through UAC; from an elevated prompt it just
+runs. If it added you to the group, sign out and back in before using `tia`. Re-run the install
+after every upgrade: the approval is tied to the exe's bytes, so a new build is unapproved until
+then. `repair.ps1` does this work and stays in the install folder for later.
+
+**Where you run it from does not matter, and neither does where it installs.** Unpack the zip
+anywhere — Downloads, a USB stick, a network share — and run `install.ps1` from there; it installs
+to `%LOCALAPPDATA%\Programs\tia-cli`, or to any `-InstallDir` you name, including `C:\tia` or a
+folder on another drive. What matters is that the installed folder then *stays put*: the Openness
+approval records the exe's full path alongside a hash of its bytes, so moving or rebuilding it
+invalidates the approval. `repair.ps1` and `uninstall.ps1` are copied in beside `tia.exe` and act on
+whatever folder they find themselves in, so a non-default install needs no arguments later either.
+
+`-InstallDir <path>` puts it somewhere else, `-NoPath` leaves your PATH alone, and `-NoElevate`
+skips the machine-wide step and writes nothing outside your profile. Installing over an
 existing copy stops its session first — a background session owns a TIA Portal, and replacing the
 exe underneath it would strand that portal with nothing left to close it.
 
@@ -103,7 +120,22 @@ powershell -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\Programs\tia-cli\uninst
 
 Which stops the session, takes the folder off your PATH, and deletes both the tool and its state
 file and log. `-KeepData` keeps the latter two. The Openness whitelist entry under HKLM is left
-alone, being harmless once the exe it names is gone; an elevated `-RemoveWhitelist` run clears it.
+alone, being harmless once the exe it names is gone; `-RemoveWhitelist` clears it, asking for
+administrator rights as it goes.
+
+For a machine that has collected copies over time — an install here, an unpacked zip there, a build
+folder that was once approved — `-All` finds every one of them, from your PATH, the machine PATH,
+the Openness whitelist, any running `tia.exe` and the default location, and clears the lot including
+the registry. It says what it found and what will happen to each folder before touching anything,
+and `-Yes` skips the asking:
+
+```bash
+powershell -ExecutionPolicy Bypass -File uninstall.ps1 -All
+```
+
+A folder is only deleted outright when everything in it came from the zip. Anywhere shared — a drive
+root, your profile, a Desktop, a build tree — keeps its folder and loses only the files tia put
+there, because "the install folder" can perfectly well be `C:\`.
 
 ## Build
 
@@ -177,7 +209,9 @@ that window has nowhere to appear, nobody answers it, and the call eventually gi
 `install.ps1` prints this instruction when the file it just installed is not yet approved. With more than one portal open `tia` cannot tell which you mean, so add `--attach <pid>` from `tia portals`, or `--start` to approve against a throwaway portal of its own.
 
 An administrator can pre-empt the dialog instead by writing the whitelist entry directly, which is
-what `repair.ps1` does. TIA Portal still has the final say.
+what `install.ps1` does unless you pass `-NoElevate` or decline its UAC prompt. `repair.ps1`, left in
+the install folder, does the same on its own and asks for UAC itself. TIA Portal still has the
+final say.
 
 ### Why the daemon might not start
 
@@ -192,8 +226,7 @@ and outlives the command. Two unrelated things make that fail with `ERROR_CANCEL
   approval survives.
 - **A forced-elevation flag.** A `RUNASADMIN` compatibility layer on `tia.exe` turns that hidden
   launch into a UAC prompt with nowhere to appear, which Windows then declines for you.
-  `install.ps1` clears it for your own account and reports one set machine-wide, which needs an
-  administrator.
+  `install.ps1` clears it for your own account, and machine-wide in its elevated step.
 
 If it still will not start, run `tia --serve` in a visible terminal and use `tia` from a second one:
 whatever the shell is refusing becomes visible instead of being swallowed. The daemon's own log is

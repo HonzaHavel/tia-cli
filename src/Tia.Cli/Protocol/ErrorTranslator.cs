@@ -67,9 +67,12 @@ namespace TiaCli.Protocol
                     Message = ex.Message,
                     Detail = detail,
                     Hint = "Add your Windows account to the local 'Siemens TIA Openness' group and " +
-                           "sign out and back in. If you are already a member, TIA Portal is asking " +
-                           "you to confirm this program in its own window - answer that dialog once " +
-                           "and the confirmation is remembered until tia.exe is rebuilt.",
+                           "sign out and back in - membership is read at logon. If you are already a " +
+                           "member, TIA Portal is waiting for you to confirm this program in its own " +
+                           "window, which a background session has nowhere to show: run repair.ps1 " +
+                           "from the install folder to write that approval directly, or answer the " +
+                           "window once by running the command with --no-daemon against a portal on " +
+                           "screen. Either is remembered until tia.exe is replaced.",
                 };
             }
 

@@ -4,17 +4,20 @@
     a daemon that will not launch, and an Openness approval dialog that never appears.
 
 .DESCRIPTION
-    install.ps1 already clears the mark of the web and any forced-elevation flag, so a normal
-    install should not need this. It is here for what install.ps1 cannot reach without
-    administrator rights - chiefly writing the Openness whitelist entry itself - and for
-    diagnosing a machine where something else is in the way.
+    install.ps1 runs this itself, elevated, as its last step, so a normal install should not
+    need it by hand. It is here for when that step was skipped (-NoElevate, or the UAC prompt
+    was declined) and for diagnosing a machine where something else is in the way.
+
+    Run without administrator rights, it asks for them with a UAC prompt and carries on in a
+    new window.
 
     Runs six checks, each of which prints what it found before it changes anything:
 
       1. Environment      - 64-bit PowerShell, elevated, exe present
       2. Mark of the Web  - unblocks the downloaded binaries
       3. AppCompatFlags   - clears a stray RUNASADMIN layer on tia.exe
-      4. Openness group    - reports membership, and whether your logon token has it yet
+      4. Openness group    - reports membership (adds it with -AddToGroup), and whether
+                             your logon token has it yet
       5. Whitelist         - writes the HKLM approval entry for this exact tia.exe
       6. Verify            - reads the entry back the same way OpennessWhitelist.cs does
 
@@ -23,13 +26,24 @@
     final home, and run it again after any upgrade that replaces the exe.
 
 .PARAMETER ExePath
-    Full path to the installed tia.exe. Defaults to the install.ps1 location.
+    Full path to the installed tia.exe. Defaults to the one next to this script, else the
+    install.ps1 default location.
 
 .PARAMETER OpennessVersion
     Which Openness version key to write under. Defaults to every version installed.
 
+.PARAMETER User
+    The account tia runs as, DOMAIN\user. Defaults to the current one. Matters when UAC elevates
+    into a different administrator account, where the current one is the wrong answer.
+
+.PARAMETER AddToGroup
+    Add -User to the Siemens TIA Openness group if it is not in it already.
+
 .PARAMETER DryRun
     Report only. Makes no changes.
+
+.PARAMETER NoNextSteps
+    Skip the closing advice. install.ps1 prints its own.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File .\repair.ps1 -DryRun
@@ -38,13 +52,27 @@
 
 [CmdletBinding()]
 param(
-    [string]   $ExePath = (Join-Path $env:LOCALAPPDATA 'Programs\tia-cli\tia.exe'),
+    [string]   $ExePath,
     [string[]] $OpennessVersion,
-    [switch]   $DryRun
+    [string]   $User = "$env:USERDOMAIN\$env:USERNAME",
+    [switch]   $AddToGroup,
+    [switch]   $DryRun,
+    [switch]   $NoNextSteps
 )
 
 $ErrorActionPreference = 'Stop'
 $script:Failed = $false
+
+# install.ps1 leaves this script next to the installed tia.exe, so that is the copy to approve. The
+# unpacked zip has a tia.exe beside this script too, but also install.ps1, which is never copied -
+# approving that copy would be useless. $PSScriptRoot is empty inside a param() default under
+# Windows PowerShell 5.1, hence resolving it here.
+if (-not $ExePath) {
+    $ExePath = Join-Path $PSScriptRoot 'tia.exe'
+    if (-not (Test-Path -LiteralPath $ExePath) -or (Test-Path (Join-Path $PSScriptRoot 'install.ps1'))) {
+        $ExePath = Join-Path $env:LOCALAPPDATA 'Programs\tia-cli\tia.exe'
+    }
+}
 
 function Say  ($m) { Write-Host "  $m" }
 function Ok   ($m) { Write-Host "  [ ok ] $m"   -ForegroundColor Green }
@@ -67,12 +95,31 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] `
     [Security.Principal.WindowsIdentity]::GetCurrent()
     ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-if (-not $isAdmin) {
-    Fail 'Not elevated. The whitelist lives under HKLM and needs administrator rights.'
-    Say  '       Right-click PowerShell -> Run as administrator, then re-run this script.'
-    exit 1
+if ($isAdmin) {
+    Ok 'Running elevated'
+} elseif ($DryRun) {
+    Ok 'Not elevated - fine for a dry run, which only reads'
+} else {
+    # The whitelist lives under HKLM. Ask for elevation rather than just failing, and pin the exe
+    # and the account down now: the elevated shell may belong to a different administrator, whose
+    # LOCALAPPDATA and USERNAME would point at the wrong install.
+    Say 'Not elevated. Asking for administrator rights - carrying on in a new window.'
+    function Quote($s) { "'" + ($s -replace "'", "''") + "'" }
+    $relaunch = "& $(Quote $PSCommandPath) -ExePath $(Quote $ExePath) -User $(Quote $User)"
+    if ($AddToGroup)      { $relaunch += ' -AddToGroup' }
+    if ($OpennessVersion) { $relaunch += ' -OpennessVersion ' + (($OpennessVersion | ForEach-Object { Quote $_ }) -join ',') }
+    # EncodedCommand sidesteps every layer of command-line quoting for the paths.
+    $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($relaunch))
+    try {
+        Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -Verb RunAs -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-NoExit', '-EncodedCommand', $encoded)
+    } catch {
+        Fail 'Elevation was declined. The whitelist lives under HKLM and needs administrator rights.'
+        Say  '       Right-click PowerShell -> Run as administrator, then re-run this script.'
+        exit 1
+    }
+    exit 0
 }
-Ok 'Running elevated'
 
 if (-not (Test-Path -LiteralPath $ExePath)) {
     Fail "tia.exe not found at: $ExePath"
@@ -138,7 +185,8 @@ foreach ($lk in $layerKeys) {
 }
 if (-not $foundLayer) { Ok 'No forced-elevation layer on tia.exe' }
 
-if ($env:USERNAME -and $fullPath -notlike "*$env:USERNAME*") {
+$userName = ($User -split '\\')[-1]
+if ($userName -and $fullPath -notlike "*$userName*") {
     Warn 'HKCU here belongs to the elevating account. If UAC switched users, check the'
     Say  '       HKCU Layers key under your OWN account as well.'
 }
@@ -149,23 +197,50 @@ if ($env:USERNAME -and $fullPath -notlike "*$env:USERNAME*") {
 Step '4. Siemens TIA Openness group'
 
 $groupName = 'Siemens TIA Openness'
-try {
-    $members = (Get-LocalGroupMember -Group $groupName -ErrorAction Stop).Name
-    $me      = "$env:USERDOMAIN\$env:USERNAME"
-    $inGroup = $members -contains $me
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
 
-    $inToken = (whoami /groups) -match [regex]::Escape($groupName)
-
-    if     ($inGroup -and $inToken) { Ok "$me is a member, and the token has it" }
-    elseif ($inGroup)               { Warn "$me is a member but your logon token predates it. Sign out and back in." }
-    else {
-        Fail "$me is NOT in '$groupName'. Every Openness call will fail with access_denied (exit 7)."
-        Say  "       Add-LocalGroupMember -Group '$groupName' -Member '$me'   then sign out and back in."
-    }
-} catch {
+if (-not (Get-LocalGroup -Name $groupName -ErrorAction SilentlyContinue)) {
     Fail "Local group '$groupName' does not exist."
     Say  '       TIA Portal was installed without the Openness option. Re-run the Siemens'
     Say  '       installer and select it. Nothing below will help until that is fixed.'
+} else {
+    # Get-LocalGroupMember throws on a group holding an orphaned SID, which happens once an account
+    # that was in it is deleted - so an unreadable list means "don't know", not "no such group".
+    $inGroup = $null
+    try   { $inGroup = @((Get-LocalGroupMember -Group $groupName -ErrorAction Stop).Name) -contains $User }
+    catch { Warn "Could not list the members of '$groupName': $($_.Exception.Message)" }
+
+    $added = $false
+    if (-not $inGroup -and $AddToGroup -and -not $DryRun) {
+        try {
+            Add-LocalGroupMember -Group $groupName -Member $User -ErrorAction Stop
+            $added = $true
+            Ok "Added $User to '$groupName'"
+        } catch [Microsoft.PowerShell.Commands.MemberExistsException] {
+            $inGroup = $true
+        } catch {
+            Fail "Could not add $User to '$groupName': $($_.Exception.Message)"
+        }
+    }
+
+    # The token is only ours to inspect when this is running as that same account.
+    $sameAccount = $me -ieq $User
+    $inToken = $sameAccount -and [bool]((whoami /groups) -match [regex]::Escape($groupName))
+
+    if ($added) {
+        Warn 'Sign out and back in - membership is read at logon, so until then every Openness'
+        Say  '       call still fails with access_denied (exit 7).'
+    } elseif ($inGroup -and $inToken) {
+        Ok "$User is a member, and the token has it"
+    } elseif ($inGroup -and $sameAccount) {
+        Warn "$User is a member but your logon token predates it. Sign out and back in."
+    } elseif ($inGroup) {
+        Ok "$User is a member (sign out and back in if it was added since your last logon)"
+    } elseif ($inGroup -eq $false) {
+        Fail "$User is NOT in '$groupName'. Every Openness call will fail with access_denied (exit 7)."
+        Say  "       Re-run with -AddToGroup, or: Add-LocalGroupMember -Group '$groupName' -Member '$User'"
+        Say  '       then sign out and back in.'
+    }
 }
 
 # --- 5. Whitelist entry ------------------------------------------------------
@@ -235,6 +310,9 @@ if ($script:Failed) {
     Write-Host 'Done.' -ForegroundColor Green
 }
 
+$code = if ($script:Failed) { 1 } else { 0 }
+if ($NoNextSteps) { exit $code }
+
 Write-Host @"
 
 Next steps
@@ -255,3 +333,5 @@ Remember
   Approval follows the bytes. Any upgrade that replaces tia.exe invalidates this
   entry - re-run the script after it.
 "@ -ForegroundColor Gray
+
+exit $code

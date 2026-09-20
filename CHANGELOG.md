@@ -3,6 +3,40 @@
 Notable changes to tia-cli. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Changed
+
+**`install.ps1` approves what it installs.** It used to stay inside your profile and leave the
+machine-wide part to `repair.ps1`, which nobody remembers at the moment it matters — so every fresh
+install, and every upgrade, left a `tia.exe` TIA Portal had never approved, and the first background
+session timed out against an approval window nobody could see. Install now finishes by running
+`repair.ps1` elevated: one UAC prompt from a normal shell, none from an admin one. That writes the
+Openness whitelist entry for the exact bytes just installed, adds you to the Siemens TIA Openness
+group if you are missing, and clears a machine-wide `RUNASADMIN` flag. `-NoElevate` restores the old
+profile-only behaviour; declining UAC is reported, not fatal.
+
+**`uninstall.ps1 -All` clears a machine that has collected copies.** It finds every install from
+your PATH, the machine PATH, the Openness whitelist, any running `tia.exe` and the default location,
+and removes the files, the PATH entries and the registry entries together, asking about each folder
+first. Whitelist entries are only cleared wholesale when every install was; keep one, keep its
+approval.
+
+**A folder is no longer deleted unless everything in it came from the zip.** Uninstall used to empty
+its install folder and then delete the folder — fine for `%LOCALAPPDATA%\Programs\tia-cli`, and a
+disaster for someone who installed into `C:\`, a profile root or a Desktop, all of which are
+perfectly legal `-InstallDir` values. Those now keep the folder and lose only the files tia put
+there, by name, with any leftover DLLs reported rather than assumed.
+
+**The access_denied hint names the fix that works without a dialog.** It used to say to answer TIA
+Portal's confirmation window — which is exactly what a background session cannot show, so the advice
+was unusable at the moment you needed it. It now says that, and points at `repair.ps1`. The
+pending-approval warning does the same.
+
+`repair.ps1` asks for elevation itself instead of refusing to run, takes `-User` and `-AddToGroup`,
+approves the `tia.exe` next to it rather than assuming the default install folder, reads a group
+holding an orphaned SID without mistaking it for a missing group, and exits non-zero on failure.
+
 ## 0.2.0 — 2026-09-16
 
 ### Added
