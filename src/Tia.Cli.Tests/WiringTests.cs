@@ -81,6 +81,35 @@ namespace TiaCli.Tests
         }
 
         [Fact]
+        public void EveryVerbTheCliAnswersIsInTheFieldTest()
+        {
+            // The field test is the only thing that runs a verb against a licensed TIA Portal, and it
+            // runs on another machine - a verb missing from it is one nobody has ever seen work.
+            var commands = Source("Cli", "Commands.cs");
+            var harness = Source("..", "..", "tools", "fieldtest.ps1");
+
+            // Cases are written as argument arrays - @('project', 'open', $path) - so joining the
+            // elements back up turns each one into the line a user would type.
+            var typed = harness.Replace("', '", " ");
+
+            var verbs = Regex.Matches(commands, "case \"([a-z][a-z ]*)\":")
+                .Cast<Match>()
+                .Select(m => m.Groups[1].Value)
+                .Distinct()
+                .Except(UndocumentedAliases)
+                .ToList();
+
+            Assert.True(verbs.Count > 20, $"Only found {verbs.Count} verbs in Commands.cs");
+
+            var untested = verbs
+                .Where(v => !typed.Contains("'" + v + "'") && !typed.Contains("'" + v + " "))
+                .ToList();
+
+            Assert.True(untested.Count == 0,
+                "tools/fieldtest.ps1 has no case for: " + string.Join(", ", untested));
+        }
+
+        [Fact]
         public void EveryVerbTheHelpPromisesIsAnswered()
         {
             // The other direction: help that lists a verb nobody handles sends people to a dead end.

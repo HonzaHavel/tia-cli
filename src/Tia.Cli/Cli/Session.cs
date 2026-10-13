@@ -16,7 +16,10 @@ namespace TiaCli.Cli
     {
         public static int Start(CommandLine cmd, Output output)
         {
-            if (DaemonClient.IsAvailable())
+            // A session that was just told to stop still answers while it closes TIA Portal. Joining it
+            // would report a session that is gone a moment later - 'session stop; session start' on
+            // one line did exactly that - so one on its way out is waited for, not joined.
+            if (DaemonClient.IsAvailable() && !(IsStopping() && DaemonClient.WaitUntilGone()))
             {
                 output.Warn("A tia session is already running. Use 'tia session stop' first, " +
                             "or 'tia session status' to see it.");
@@ -66,6 +69,19 @@ namespace TiaCli.Cli
             return Status(cmd, executor, output);
         }
 
+        private static bool IsStopping()
+        {
+            try
+            {
+                return JsonUtil.To<DaemonStatusDto>(Commands.Call(new DaemonExecutor(), "daemon.status")).Stopping;
+            }
+            catch
+            {
+                // It answered the probe and not the question: it went in between.
+                return true;
+            }
+        }
+
         public static int Stop(CommandLine cmd, Output output)
         {
             if (!DaemonClient.IsAvailable())
@@ -87,6 +103,11 @@ namespace TiaCli.Cli
             catch { }
 
             Commands.Call(executor, "daemon.stop");
+
+            // Stopped means gone: the daemon answers for as long as closing TIA Portal takes, and a
+            // script's next line should not have to guess when that is over.
+            if (!DaemonClient.WaitUntilGone())
+                output.Warn("The session is still closing TIA Portal. Give it a moment before starting another.");
 
             if (output.AsJson)
             {

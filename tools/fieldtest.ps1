@@ -6,6 +6,9 @@
     Everything here runs against an installed tia.exe. Nothing is compiled, so the machine needs no
     development tools - PowerShell and the installed CLI are enough.
 
+    Every verb the CLI answers has at least one case here, and a unit test (WiringTests) fails when
+    a verb is added without one. What a run cannot reach on a given machine is skipped by name.
+
     Tests are grouped by what they need, and a group is skipped with a reason rather than failed when
     the machine cannot host it:
 
@@ -104,6 +107,10 @@ if ($zoneTagged) {
     Write-Host '  (install.ps1 does this too; running from the unpacked zip skips it.)' -ForegroundColor DarkGray
 }
 
+# The confidential-configuration password of the throwaway project: set by 'device protection',
+# asked for again by every download. It protects nothing and exists nowhere else.
+$Secret = 'FieldTest_1234!'
+
 $script:Results = New-Object Collections.ArrayList
 $script:Env     = [ordered]@{}
 
@@ -120,8 +127,18 @@ function Case {
         [string]   $Group,
         [string[]] $TiaArgs,
         [int[]]    $Expect = @(0),
-        [string]   $Note
+        [string]   $Note,
+        # Text to pipe into the command, for the verbs that read stdin.
+        [string]   $Stdin
     )
+
+    # Nearly every case works on the station 'device add' makes. Without it they would all fail the
+    # same way, and the one real finding would be buried under fifty echoes of it.
+    if ($script:NoStation -and $TiaArgs -contains 'PLC_1') {
+        Skip -Name $Name -Group $Group -Why $script:NoStation
+        $script:LastPassed = $false
+        return
+    }
 
     $started = Get-Date
 
@@ -141,7 +158,8 @@ function Case {
     try {
         # Kept as plain text: each stderr line arrives wrapped in an ErrorRecord, and printing those
         # adds a script-position banner to every error message in the report.
-        $output = (& $ExePath @TiaArgs 2>&1 | ForEach-Object {
+        $run = if ($Stdin) { { $Stdin | & $ExePath @TiaArgs 2>&1 } } else { { & $ExePath @TiaArgs 2>&1 } }
+        $output = (& $run | ForEach-Object {
             if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ }
         } | Out-String)
         $code = $LASTEXITCODE
@@ -162,7 +180,7 @@ function Case {
     }
 
     [void]$script:Results.Add([pscustomobject]@{
-        Name = $Name; Group = $Group; Command = 'tia ' + ($TiaArgs -join ' ')
+        Name = $Name; Group = $Group; Command = $(if ($Stdin) { '(stdin) | ' }) + 'tia ' + ($TiaArgs -join ' ')
         Expected = ($Expect -join ' or '); Exit = $code; Verdict = $verdict
         Seconds = $elapsed; Output = $output.TrimEnd(); Note = $Note
     })
@@ -243,8 +261,16 @@ if ($AllowPlcWrite) {
 # ---------------------------------------------------------------- session
 Head 'Session'
 
+Case -Name 'version'                      -Group core -TiaArgs @('--version')
+Case -Name 'help'                         -Group core -TiaArgs @('help')
+Case -Name 'unknown verb exits 2'         -Group core -TiaArgs @('nonsense-verb') -Expect @(2)
 Case -Name 'portals lists instances'      -Group core -TiaArgs @('portals')
 Case -Name 'session status with none'     -Group core -TiaArgs @('session status')
+
+# The one-shot path: no session, a headless portal of its own for a single command, gone afterwards.
+# --new keeps it away from any portal already open on this machine. It is also the first real
+# Openness call of the run, in the foreground - an unapproved tia.exe shows up here as exit 7.
+Case -Name 'one-shot with its own portal' -Group core -TiaArgs @('catalog', '1214', '--limit', '3', '--new', '--headless', '--no-daemon')
 
 # With several portals open and no session, tia refuses to guess which one is meant. That is a
 # documented behaviour worth checking, and it touches none of those portals.
@@ -280,7 +306,8 @@ try {
         foreach ($pending in @(
             @{ n = 'project and hardware'; g = 'core' }, @{ n = 'blocks and tags'; g = 'core' },
             @{ n = 'show verbs';           g = 'ui'   }, @{ n = 'sim start';      g = 'plcsim' },
-            @{ n = 'upload and download';  g = 'plc'  }, @{ n = 'archive and retrieve'; g = 'core' })) {
+            @{ n = 'upload and download';  g = 'plc'  }, @{ n = 'archive and retrieve'; g = 'core' },
+            @{ n = 'attach and session --project'; g = 'core' })) {
             Skip -Name $pending.n -Group $pending.g -Why 'the session did not start'
         }
         Note 'If exit 7 came back in under two minutes, an unanswered "Openness access" window is'
@@ -312,8 +339,19 @@ try {
 
     $cpu = 'OrderNumber:6ES7 214-1BG40-0XB0/V4.6'
     Case -Name 'device add' -Group core -TiaArgs @('device', 'add', $cpu, 'PLC_1')
+    if (-not $script:LastPassed) { $script:NoStation = "'device add' failed, so there is no PLC_1 to work on" }
     Case -Name 'device ip'  -Group core -TiaArgs @('device', 'ip', 'PLC_1', '--address', '192.168.0.10', '--mask', '255.255.255.0', '--subnet', 'PN_1')
+    Case -Name 'device ip --router'    -Group core -TiaArgs @('device', 'ip', 'PLC_1', '--router', '192.168.0.1')
+    Case -Name 'device ip --no-router' -Group core -TiaArgs @('device', 'ip', 'PLC_1', '--no-router')
     Case -Name 'devices'    -Group core -TiaArgs @('devices')
+
+    Case -Name 'device attrs'          -Group core -TiaArgs @('device', 'attrs', 'PLC_1')
+    Case -Name 'device attrs --filter' -Group core -TiaArgs @('device', 'attrs', 'PLC_1', '--filter', 'Name')
+    Case -Name 'device set'            -Group core -TiaArgs @('device', 'set', 'PLC_1', 'Comment', 'FieldTest')
+
+    # A current CPU will not compile until this is set, so every compile and download below depends
+    # on it. The secret belongs to the throwaway project and is repeated to the downloads.
+    Case -Name 'device protection'     -Group core -TiaArgs @('device', 'protection', 'PLC_1', '--level', 'FullAccess', '--secret', $Secret)
 
     # ------------------------------------------------------------ blocks
     Head 'Blocks and tags'
@@ -343,20 +381,45 @@ END_FUNCTION_BLOCK
 
     Case -Name 'table add'  -Group core -TiaArgs @('table', 'add', 'PLC_1', 'FieldTags')
     Case -Name 'tag add'    -Group core -TiaArgs @('tag', 'add', 'PLC_1', 'MotorRun', '--table', 'FieldTags', '--type', 'Bool', '--address', '%Q0.0')
+    Case -Name 'tag add without address' -Group core -TiaArgs @('tag', 'add', 'PLC_1', 'Spare', '--table', 'FieldTags', '--type', 'Int')
+    Case -Name 'tables'     -Group core -TiaArgs @('tables', 'PLC_1')
+    Case -Name 'tags'       -Group core -TiaArgs @('tags', 'PLC_1')
+    Case -Name 'tags --table --json' -Group core -TiaArgs @('tags', 'PLC_1', '--table', 'FieldTags', '--json')
     $xml = Join-Path $ProjectDir 'Motor.xml'
 
+    $function = @'
+FUNCTION "Twice" : Int
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT
+      value : Int;
+   END_VAR
+
+BEGIN
+   #Twice := #value * 2;
+END_FUNCTION
+'@
+
     Case -Name 'source add'  -Group core -TiaArgs @('source', 'add', 'PLC_1', 'Motor', '--file', $scl)
+    Case -Name 'source add from stdin'   -Group core -TiaArgs @('source', 'add', 'PLC_1', 'Twice') -Stdin $function
+    Case -Name 'source add --no-generate' -Group core -TiaArgs @('source', 'add', 'PLC_1', 'Parked', '--file', $scl, '--no-generate')
+    Case -Name 'source delete ungenerated' -Group core -TiaArgs @('source', 'delete', 'PLC_1', 'Parked', '--force')
     Case -Name 'compile'     -Group core -TiaArgs @('compile', 'PLC_1')
+    Case -Name 'compile --json' -Group core -TiaArgs @('compile', 'PLC_1', '--json')
     Case -Name 'blocks'      -Group core -TiaArgs @('blocks', 'PLC_1')
     Case -Name 'blocks --tree' -Group core -TiaArgs @('blocks', 'PLC_1', '--tree')
     Case -Name 'blocks --type' -Group core -TiaArgs @('blocks', 'PLC_1', '--type', 'FB')
+    Case -Name 'blocks --system' -Group core -TiaArgs @('blocks', 'PLC_1', '--system')
     Case -Name 'sources'     -Group core -TiaArgs @('sources', 'PLC_1')
 
     # block show reads the interface back out of an export, so it is the one that proves the
     # SimaticML parsing still matches what this TIA version writes.
     Case -Name 'block show'   -Group core -TiaArgs @('block', 'show', 'PLC_1', 'Motor')
+    Case -Name 'block show --json' -Group core -TiaArgs @('block', 'show', 'PLC_1', 'Motor', '--json')
     Case -Name 'block source' -Group core -TiaArgs @('block', 'source', 'PLC_1', 'Motor', '--out', (Join-Path $ProjectDir 'Motor.out.scl'))
+    Case -Name 'block source to stdout' -Group core -TiaArgs @('block', 'source', 'PLC_1', 'Twice')
     Case -Name 'block export' -Group core -TiaArgs @('block', 'export', 'PLC_1', 'Motor', '--out', $xml)
+    Case -Name 'block export --print' -Group core -TiaArgs @('block', 'export', 'PLC_1', 'Motor', '--print')
 
     Case -Name 'block rename'      -Group core -TiaArgs @('block', 'rename', 'PLC_1', 'Motor', 'MotorRenamed')
     Case -Name 'block rename back' -Group core -TiaArgs @('block', 'rename', 'PLC_1', 'MotorRenamed', 'Motor')
@@ -370,6 +433,7 @@ END_FUNCTION_BLOCK
     Case -Name 'block delete in folder' -Group core -TiaArgs @('block', 'delete', 'PLC_1', 'FieldFolder/Motor', '--force')
     Case -Name 'folder delete'   -Group core -TiaArgs @('folder', 'delete', 'PLC_1', 'FieldFolder', '--force')
     Case -Name 'block import'    -Group core -TiaArgs @('block', 'import', 'PLC_1', $xml)
+    Case -Name 'block import --overwrite' -Group core -TiaArgs @('block', 'import', 'PLC_1', $xml, '--overwrite')
     Case -Name 'compile after import' -Group core -TiaArgs @('compile', 'PLC_1')
     Case -Name 'source delete'   -Group core -TiaArgs @('source', 'delete', 'PLC_1', 'Motor', '--force')
 
@@ -378,6 +442,9 @@ END_FUNCTION_BLOCK
     Case -Name 'missing block exits 5' -Group core -TiaArgs @('block', 'show', 'PLC_1', 'NoSuchBlock') -Expect @(5)
 
     Case -Name 'project save' -Group core -TiaArgs @('project', 'save')
+
+    # The shell is a prompt, but it reads stdin like anything else, so two lines stand in for a person.
+    Case -Name 'shell with piped stdin' -Group core -TiaArgs @('shell') -Stdin "devices`nblocks PLC_1`nexit"
 
     # ------------------------------------------------------------ ui
     Head 'Editors (needs a portal with a user interface)'
@@ -398,9 +465,18 @@ END_FUNCTION_BLOCK
     # ------------------------------------------------------------ plcsim
     Head 'Simulation'
 
+    # PLCSIM's API has no S7-1200, and the refusal comes before PLCSIM is touched - so this one runs
+    # on any machine, and creates nothing.
+    Case -Name 'sim create refuses an S7-1200' -Group core -TiaArgs @('sim', 'create', 'PLC_1') -Expect @(2)
+
     if ($script:Env['plcsim'] -eq 'present') {
-        Case -Name 'sim start' -Group plcsim -TiaArgs @('sim', 'start', 'PLC_1')
+        Note 'Both need a simulation already running at 192.168.0.10: TIA will not start one for a download.'
+        Case -Name 'download to PLCSIM' -Group plcsim -TiaArgs @('download', 'PLC_1', '--hardware', '--interface', 'PLCSIM', '--secret', $Secret) `
+            -Note 'The route that works today. Fails with exit 5 and a list of interfaces when no simulation is running.'
+        Case -Name 'sim start' -Group plcsim -TiaArgs @('sim', 'start', 'PLC_1', '--secret', $Secret) `
+            -Note 'In development and documented as not working yet; a failure here is known.'
     } else {
+        Skip -Name 'download to PLCSIM' -Group plcsim -Why 'S7-PLCSIM is not installed on this machine'
         Skip -Name 'sim start' -Group plcsim -Why 'S7-PLCSIM is not installed on this machine'
     }
 
@@ -417,7 +493,7 @@ END_FUNCTION_BLOCK
         Case -Name 'upload station' -Group plc -TiaArgs @('upload', $PlcAddress)
 
         if ($plcWriteOk) {
-            Case -Name 'download to PLC' -Group plc -TiaArgs @('download', 'PLC_1', '--address', $PlcAddress)
+            Case -Name 'download to PLC' -Group plc -TiaArgs @('download', 'PLC_1', '--address', $PlcAddress, '--secret', $Secret)
         } else {
             Skip -Name 'download to PLC' -Group plc -Why 'needs -AllowPlcWrite and confirmation; it stops and reloads the controller'
         }
@@ -429,12 +505,18 @@ END_FUNCTION_BLOCK
     # Last of the project work on purpose: retrieve leaves the session holding the unpacked copy,
     # and nothing after this needs more than some project being open.
     Case -Name 'table add before archive'      -Group core -TiaArgs @('table', 'add', 'PLC_1', 'ArchiveProbe')
-    Case -Name 'archive refuses unsaved changes' -Group core -TiaArgs @('project', 'archive') -Expect @(2)
+    if ($script:LastPassed) {
+        Case -Name 'archive refuses unsaved changes' -Group core -TiaArgs @('project', 'archive') -Expect @(2)
+    } else {
+        Skip -Name 'archive refuses unsaved changes' -Group core -Why 'nothing could be changed to make the project unsaved'
+    }
     Case -Name 'project archive --save'        -Group core -TiaArgs @('project', 'archive', '--save')
     $archived = $script:LastPassed
 
-    # The extension follows the TIA version (.zap20, .zap19), so the file is found rather than named.
-    $zap = Get-ChildItem -LiteralPath $ProjectDir -Filter 'FieldTest.zap*' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    # The extension follows the TIA version (.zap20, .zap19), so both files are found rather than named.
+    $zap      = Get-ChildItem -LiteralPath $ProjectDir -Filter 'FieldTest.zap*' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    $original = Get-ChildItem -LiteralPath (Join-Path $ProjectDir 'FieldTest') -Filter 'FieldTest.ap*' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+    $originalClosed = $false
 
     if (-not $archived -or -not $zap) {
         Skip -Name 'archive overwrite and retrieve' -Group core -Why 'no archive was written beside the project folder'
@@ -444,16 +526,25 @@ END_FUNCTION_BLOCK
         Case -Name 'archive --overwrite --minimize' -Group core -TiaArgs @('project', 'archive', '--overwrite', '--minimize')
 
         Case -Name 'project close' -Group core -TiaArgs @('project', 'close')
+        $originalClosed = $script:LastPassed
         Case -Name 'open refuses an archive' -Group core -TiaArgs @('project', 'open', $zap.FullName) -Expect @(2)
+
+        # The plain way back in, before the archive's: open from disk, and close with a save.
+        if ($original) {
+            Case -Name 'project open'         -Group core -TiaArgs @('project', 'open', $original.FullName)
+            Case -Name 'project close --save' -Group core -TiaArgs @('project', 'close', '--save')
+            $originalClosed = $script:LastPassed
+        }
+
         Case -Name 'project retrieve' -Group core -TiaArgs @('project', 'retrieve', $zap.FullName, $RetrieveDir)
 
         if ($script:LastPassed) {
             Case -Name 'devices after retrieve' -Group core -TiaArgs @('devices')
             Case -Name 'tables after retrieve'  -Group core -TiaArgs @('tables', 'PLC_1')
-        } else {
-            # The regression cases below want a project open; put the original back for them.
-            $original = Get-ChildItem -LiteralPath (Join-Path $ProjectDir 'FieldTest') -Filter 'FieldTest.ap*' -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($original) { Case -Name 'reopen after failed retrieve' -Group core -TiaArgs @('project', 'open', $original.FullName) }
+        } elseif ($original) {
+            # The cases below want a project open; put the original back for them.
+            Case -Name 'reopen after failed retrieve' -Group core -TiaArgs @('project', 'open', $original.FullName)
+            $originalClosed = $false
         }
     }
 
@@ -461,9 +552,47 @@ END_FUNCTION_BLOCK
     Head 'Regressions'
 
     # 0.1.0: 'tia portals' during a session disposed the session's own portal, and every later command
-    # failed with exit 9. Last in the run, so a regression cannot take the other tests down with it.
+    # failed with exit 9. Late in the run, so a regression cannot take the other tests down with it.
     Case -Name 'portals during a session' -Group core -TiaArgs @('portals')
     Case -Name 'session survives portals' -Group core -TiaArgs @('project', 'info')
+
+    # ------------------------------------------------------------ attach
+    Head 'Attaching'
+
+    # What every command does when no session is running and a portal is open: a second client joins
+    # the portal for one command and lets go again. Here the portal is the session's own, so the case
+    # after it checks that letting go did not take that portal with it.
+    $portalPid = $null
+    try { $portalPid = (& $ExePath session status --json 2>$null | ConvertFrom-Json).session.processId } catch { }
+
+    if ($portalPid) {
+        $attachArgs = @('project', 'info', '--no-daemon', '--attach', "$portalPid")
+        if ($OpennessVersion) { $attachArgs += @('--openness-version', $OpennessVersion) }
+        Case -Name 'attach by pid'                    -Group core -TiaArgs $attachArgs
+        Case -Name 'session survives a second client' -Group core -TiaArgs @('devices')
+    } else {
+        Skip -Name 'attach by pid' -Group core -Why "session status did not give the portal's process id"
+    }
+
+    # ------------------------------------------------------------ session --project
+    Head 'Session that opens a project'
+
+    # A second session, headless this time, that opens the saved project as it starts. Only when the
+    # first session let go of that project: its portal takes a few seconds to close, and a project
+    # it still holds is locked until then.
+    if ($original -and $originalClosed) {
+        Case -Name 'session stop before reopening' -Group core -TiaArgs @('session', 'stop')
+        Case -Name 'session start --project' -Group core -TiaArgs @('session', 'start', '--new', '--headless', '--project', $original.FullName)
+
+        if ($script:LastPassed) {
+            Case -Name 'project info after --project'  -Group core -TiaArgs @('project', 'info')
+            Case -Name 'blocks survive save and reopen' -Group core -TiaArgs @('blocks', 'PLC_1')
+            Case -Name 'tags survive save and reopen'   -Group core -TiaArgs @('tags', 'PLC_1', '--table', 'FieldTags')
+            Case -Name 'show refuses a headless portal' -Group core -TiaArgs @('show', 'hw') -Expect @(2)
+        }
+    } else {
+        Skip -Name 'session start --project' -Group core -Why 'the first session still holds the test project'
+    }
     } # end of the "session started" branch
 
 } catch {
@@ -474,7 +603,7 @@ END_FUNCTION_BLOCK
     foreach ($pending in @(
         @{ n = 'hardware, blocks and tags'; g = 'core'   }, @{ n = 'show verbs';          g = 'ui'  },
         @{ n = 'sim start';                 g = 'plcsim' }, @{ n = 'upload and download'; g = 'plc' },
-        @{ n = 'archive and retrieve';      g = 'core'   })) {
+        @{ n = 'archive and retrieve';      g = 'core'   }, @{ n = 'attach and session --project'; g = 'core' })) {
         Skip -Name $pending.n -Group $pending.g -Why 'the test project could not be created'
     }
     Note 'Stopped: the test project could not be created, and carrying on would have changed'
@@ -486,7 +615,13 @@ END_FUNCTION_BLOCK
     Case -Name 'session stop' -Group core -TiaArgs @('session', 'stop') | Out-Null
 
     if (-not $KeepProject) {
-        try { Remove-Item -LiteralPath $ProjectDir -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+        # The portal keeps the project's files locked for a few seconds after 'session stop' returns.
+        foreach ($attempt in 1..10) {
+            try { Remove-Item -LiteralPath $ProjectDir -Recurse -Force -ErrorAction SilentlyContinue } catch { }
+            if (-not (Test-Path -LiteralPath $ProjectDir)) { break }
+            Start-Sleep -Seconds 3
+        }
+        if (Test-Path -LiteralPath $ProjectDir) { Note "Could not delete $ProjectDir - still locked. It is safe to delete by hand." }
     } else {
         Note "Project kept at $ProjectDir"
     }

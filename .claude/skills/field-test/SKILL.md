@@ -73,6 +73,7 @@ Useful variations:
 | Situation | Command |
 | --- | --- |
 | No portal window wanted | add `-SkipUi` |
+| S7-PLCSIM is installed | start a simulation at `192.168.0.10` first — the two simulation cases download to one that is running, and fail without it |
 | A PLC to read from | add `-PlcAddress 192.168.0.1` |
 | A PLC that is safe to stop | add `-PlcAddress ... -AllowPlcWrite` |
 | tia installed somewhere unusual | add `-ExePath C:\path\to\tia.exe` |
@@ -99,7 +100,9 @@ Work through it in this order:
    licence, no PLCSIM, `NOT in token` for the Openness group — each explains a whole class of
    failure, and none of them is a bug in tia-cli.
 2. **Skips are information, not gaps to close.** A skipped group means the machine could not host
-   it. Report it as untested; do not suggest re-running with the safety flags turned on.
+   it. Report it as untested; do not suggest re-running with the safety flags turned on. A long run
+   of skips reading "there is no PLC_1 to work on" has one cause: `device add` failed, and its exit
+   code (8 on a machine without a licence) is the finding.
 3. **Then the failures**, using the transcript at the bottom, which holds the full output of every
    command. Match the exit code against the documented table: `2` bad arguments, `3` no session,
    `4` no project, `5` not found, `6` ambiguous, `7` access denied, `8` licence missing,

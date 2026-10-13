@@ -38,6 +38,22 @@ namespace TiaCli.Daemon
         }
 
         /// <summary>
+        /// Waits for a daemon that has accepted a stop to actually go. It keeps answering its pipe
+        /// while it closes TIA Portal, which takes seconds - long enough for the next command to
+        /// find it there. False when it is still around at the end of the wait.
+        /// </summary>
+        public static bool WaitUntilGone(int timeoutMs = 60000)
+        {
+            var deadline = Environment.TickCount + timeoutMs;
+            while (IsAvailable(200))
+            {
+                if (Environment.TickCount >= deadline) return false;
+                Thread.Sleep(200);
+            }
+            return true;
+        }
+
+        /// <summary>
         /// Sends one request and waits for its answer. There is deliberately no read timeout:
         /// opening a project takes minutes, and cutting it off would leave the daemon working on a
         /// request nobody is listening for.

@@ -22,7 +22,22 @@ one meant going through the TIA Portal menus.
 - `project open` on an archive now says to use `project retrieve` instead of failing with a bare
   Openness error.
 
+### Fixed
+
+**`session stop; session start` on one line starts a session.** A session told to stop keeps
+answering its pipe while it closes TIA Portal, and a `session start` arriving in those seconds found
+it, said a session was already running, exited 0 — and left you with nothing a moment later. That
+was the documented way to recover from exit 9. `session stop` now returns once the session has
+actually gone, and `session start` waits for one that is on its way out instead of joining it.
+
 ### Changed
+
+**The field test covers every verb.** `tools/fieldtest.ps1` gained the cases it was missing — device
+attributes and protection, tag and table listings, stdin and `--no-generate` sources, `--print` and
+`--overwrite`, the shell, a one-shot command with its own portal, attaching by pid, archive and
+retrieve, and a second session started with `--project` — and a unit test now fails when a verb is
+added without one. When `device add` fails, the cases that need its station are skipped by name
+rather than failing fifty times for the same reason.
 
 **`install.ps1` approves what it installs.** It used to stay inside your profile and leave the
 machine-wide part to `repair.ps1`, which nobody remembers at the moment it matters — so every fresh
