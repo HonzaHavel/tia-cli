@@ -226,6 +226,12 @@ namespace TiaCli.Openness
             if (!file.Exists)
                 throw new SessionException(WireErrorCodes.NotFound, $"Project file not found: {path}");
 
+            // Open() on an archive fails with a bare Openness error that never mentions the cause.
+            if (file.Extension.StartsWith(".zap", StringComparison.OrdinalIgnoreCase))
+                throw new SessionException(WireErrorCodes.InvalidRequest,
+                    $"{file.Name} is a project archive, not a project.",
+                    "Unpack and open it with 'tia project retrieve <archive> <dir>'.");
+
             _project = upgrade
                 ? portal.Projects.OpenWithUpgrade(file)
                 : portal.Projects.Open(file);
@@ -263,6 +269,130 @@ namespace TiaCli.Openness
             if (save) project.Save();
             project.Close();
             _project = null;
+        }
+
+        /// <summary>
+        /// Packs the project into a single .zapNN file - TIA's "Archive". The archive is made from
+        /// what is on disk, and TIA refuses while there are unsaved changes, so that is settled here
+        /// first rather than left to a bare Openness error.
+        /// </summary>
+        public ArchiveDto ArchiveProject(string target, bool minimize, bool save, bool overwrite)
+        {
+            var project = RequireProject();
+
+            if (project.IsModified)
+            {
+                if (!save)
+                    throw new SessionException(WireErrorCodes.InvalidRequest,
+                        $"Project '{project.Name}' has unsaved changes, and TIA Portal only archives a saved project.",
+                        "Add --save, or run 'tia project save' first.");
+                project.Save();
+            }
+
+            var file = new FileInfo(ArchiveTarget(project.Path.FullName, target,
+                target != null && Directory.Exists(target)));
+
+            // An archive being replaced is moved aside rather than deleted, and only dropped once the
+            // new one exists: this is a backup command, and a failed run must not cost the last backup.
+            string aside = null;
+            if (file.Exists)
+            {
+                if (!overwrite)
+                    throw new SessionException(WireErrorCodes.InvalidRequest,
+                        $"{file.FullName} already exists.", "Add --overwrite to replace it.");
+
+                aside = file.FullName + ".previous";
+                File.Delete(aside);
+                File.Move(file.FullName, aside);
+            }
+
+            file.Directory.Create();
+
+            try
+            {
+                project.Archive(file.Directory, file.Name, minimize
+                    ? ProjectArchivationMode.DiscardRestorableDataAndCompressed
+                    : ProjectArchivationMode.Compressed);
+
+                file.Refresh();
+                if (!file.Exists)
+                    throw new SessionException(WireErrorCodes.OpennessError,
+                        $"TIA Portal reported the archive as written, but there is no file at {file.FullName}.",
+                        "Look in " + file.Directory.FullName + " for what it made instead, and report the name.");
+            }
+            catch
+            {
+                if (aside != null)
+                {
+                    try
+                    {
+                        File.Delete(file.FullName);
+                        File.Move(aside, file.FullName);
+                    }
+                    catch { /* the previous archive is still there under its .previous name */ }
+                }
+                throw;
+            }
+
+            if (aside != null) File.Delete(aside);
+
+            return new ArchiveDto
+            {
+                Project = project.Name,
+                FilePath = file.FullName,
+                Bytes = file.Length,
+                Minimized = minimize,
+            };
+        }
+
+        /// <summary>
+        /// Where an archive goes. With no target it lands beside the project folder under the
+        /// project's own name; a directory gets that name inside it; anything else is the file. The
+        /// extension is the project's with a 'z' in front (.ap20 -> .zap20), and it is added when
+        /// missing because TIA only offers to retrieve files that carry it.
+        /// </summary>
+        internal static string ArchiveTarget(string projectFile, string target, bool targetIsDirectory)
+        {
+            var extension = ".z" + Path.GetExtension(projectFile).TrimStart('.');
+            var defaultName = Path.GetFileNameWithoutExtension(projectFile) + extension;
+
+            if (string.IsNullOrEmpty(target))
+            {
+                var projectFolder = Path.GetDirectoryName(projectFile);
+                return Path.Combine(Path.GetDirectoryName(projectFolder) ?? projectFolder, defaultName);
+            }
+
+            if (targetIsDirectory ||
+                target.EndsWith(Path.DirectorySeparatorChar.ToString(), StringComparison.Ordinal) ||
+                target.EndsWith(Path.AltDirectorySeparatorChar.ToString(), StringComparison.Ordinal))
+                return Path.Combine(target, defaultName);
+
+            return target.EndsWith(extension, StringComparison.OrdinalIgnoreCase) ? target : target + extension;
+        }
+
+        /// <summary>
+        /// Unpacks an archive into a directory and opens what comes out - TIA's "Retrieve". The
+        /// project folder is created inside the directory, under the name it had when archived.
+        /// </summary>
+        public ProjectDto RetrieveProject(string archivePath, string directory, bool upgrade)
+        {
+            var portal = RequirePortal();
+            if (_project != null)
+                throw new SessionException(WireErrorCodes.InvalidRequest,
+                    $"Project '{_project.Name}' is already open in this session. Close it first.");
+
+            var archive = new FileInfo(archivePath);
+            if (!archive.Exists)
+                throw new SessionException(WireErrorCodes.NotFound, $"Archive not found: {archivePath}");
+
+            var target = new DirectoryInfo(directory);
+            if (!target.Exists) target.Create();
+
+            _project = upgrade
+                ? portal.Projects.RetrieveWithUpgrade(archive, target)
+                : portal.Projects.Retrieve(archive, target);
+
+            return Describe(_project);
         }
 
         // ---------------------------------------------------------------- devices

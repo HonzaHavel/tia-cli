@@ -58,6 +58,12 @@ PROJECT
   project info             Describe the open project
   project save             Save it
   project close            Close it                                [--save]
+  project archive          Pack it into one .zapNN file            [<path>] [--save] [--overwrite]
+                           No path puts it beside the project folder; a folder gets the project's
+                           name in it. TIA only archives a saved project, hence --save.
+                                 [--minimize] leaves out the data TIA can rebuild
+  project retrieve <archive> <dir>
+                           Unpack an archive into <dir> and open it        [--upgrade]
 
 HARDWARE
   devices                  List stations, their CPUs and addresses

@@ -246,6 +246,8 @@ Run `tia help` for the full text.
 | `tia project open <path>` | Open a project (`--upgrade`) |
 | `tia project new <dir> <name>` | Create one |
 | `tia project info` / `save` / `close` | `close --save` to save on the way out |
+| `tia project archive [<path>]` | Pack the project into one `.zapNN` file. No path: beside the project folder. `--save` first if there are unsaved changes, `--minimize` leaves out what TIA can rebuild, `--overwrite` replaces an existing archive |
+| `tia project retrieve <archive> <dir>` | Unpack an archive into `<dir>` and open it (`--upgrade`) |
 | `tia devices` | Stations, their CPUs and addresses |
 | `tia catalog <filter>` | Search the hardware catalog for order numbers |
 | `tia device add <type> <name>` | Add a station from a type identifier |
@@ -323,6 +325,11 @@ tia compile PLC_1 || echo "compile failed"
   portal is the main use case, and their project appearing mid-session is normal.
 - **`tia project new` writes nothing to disk until `tia project save`**, and blocks made by
   `source add` are not checked until `tia compile`.
+- **An archive is made from what is on disk.** TIA refuses to archive a project with unsaved
+  changes, so `tia project archive` says so up front and takes `--save`. With `--overwrite` the old
+  archive is moved aside and only dropped once the new one exists — a failed run does not cost the
+  last backup. `tia project open` on a `.zapNN` file points at `tia project retrieve` instead of
+  passing on the bare Openness error.
 - **A block's interface is not readable through Openness.** Only `DataBlock` has an `Interface`
   property at all, and its members give up nothing but their names — no data type, no start value, no
   comment. So `tia block show` exports the block to a temporary file and reads the SimaticML back.

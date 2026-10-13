@@ -161,6 +161,11 @@ namespace TiaCli.Openness
                 case "project.info": return _session.ProjectInfo();
                 case "project.save": _session.SaveProject(); return Ok();
                 case "project.close": _session.CloseProject(p.Bool("save", false)); return Ok();
+                case "project.archive": return _session.ArchiveProject(
+                    p.String("target"), p.Bool("minimize", false), p.Bool("save", false),
+                    p.Bool("overwrite", false));
+                case "project.retrieve": return _session.RetrieveProject(
+                    p.RequiredString("archive"), p.RequiredString("directory"), p.Bool("upgrade", false));
 
                 case "device.list": return _session.ListDevices();
                 case "catalog.search": return _session.SearchCatalog(

@@ -5,6 +5,23 @@ and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
 ## Unreleased
 
+### Added
+
+**`project archive` and `project retrieve`.** A project is a folder of several hundred files; the
+thing people actually pass around and back up is the single `.zapNN` archive, and making or opening
+one meant going through the TIA Portal menus.
+
+- `project archive [<path>]` packs the open project. With no path the archive lands beside the
+  project folder under the project's name; a folder gets that name inside it; anything else is the
+  file, with the version's extension (`.zap20` for an `.ap20`) added when it is missing. TIA only
+  archives a saved project, so unsaved changes are refused by name unless `--save` is given.
+  `--minimize` leaves out the data TIA can rebuild. An existing archive is refused unless
+  `--overwrite`, and then moved aside until the new one exists rather than deleted first.
+- `project retrieve <archive> <dir>` unpacks an archive into a directory and leaves the project
+  open, `--upgrade` for one from an older TIA version.
+- `project open` on an archive now says to use `project retrieve` instead of failing with a bare
+  Openness error.
+
 ### Changed
 
 **`install.ps1` approves what it installs.** It used to stay inside your profile and leave the

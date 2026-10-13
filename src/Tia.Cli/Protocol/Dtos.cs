@@ -61,6 +61,15 @@ namespace TiaCli.Protocol
         public int DeviceCount { get; set; }
     }
 
+    public sealed class ArchiveDto
+    {
+        public string Project { get; set; }
+        public string FilePath { get; set; }
+        public long Bytes { get; set; }
+        /// <summary>True when restorable data was left out, TIA's "minimized" archive.</summary>
+        public bool Minimized { get; set; }
+    }
+
     public sealed class DeviceDto
     {
         public string Name { get; set; }

@@ -24,6 +24,8 @@ namespace TiaCli.Cli
                 case "project info": return ProjectInfo(executor, output);
                 case "project save": return ProjectSave(executor, output);
                 case "project close": return ProjectClose(cmd, executor, output);
+                case "project archive": return ProjectArchive(cmd, executor, output);
+                case "project retrieve": return ProjectRetrieve(cmd, executor, output);
 
                 case "devices": return Devices(executor, output);
                 case "catalog": return Catalog(cmd, executor, output);
@@ -264,6 +266,45 @@ namespace TiaCli.Cli
         {
             Call(executor, "project.close", new { save = cmd.Has("save") });
             output.Line(cmd.Has("save") ? "Saved and closed." : "Closed without saving.");
+            return 0;
+        }
+
+        private static int ProjectArchive(CommandLine cmd, IExecutor executor, Output output)
+        {
+            var target = cmd.PositionalOrNull(0);
+
+            var result = Call(executor, "project.archive", new
+            {
+                // Null lets the session put it beside the project folder, under the project's name.
+                target = string.IsNullOrEmpty(target) ? null : Path.GetFullPath(target),
+                minimize = cmd.Has("minimize"),
+                save = cmd.Has("save"),
+                overwrite = cmd.Has("overwrite"),
+            });
+
+            if (output.AsJson) { output.Json(result); return 0; }
+
+            var archive = JsonUtil.To<ArchiveDto>(result);
+            output.Line($"{archive.Project} -> {archive.FilePath} ({archive.Bytes:n0} bytes)");
+            output.Detail("Open it again with 'tia project retrieve <archive> <dir>'.");
+            return 0;
+        }
+
+        private static int ProjectRetrieve(CommandLine cmd, IExecutor executor, Output output)
+        {
+            var archive = Path.GetFullPath(cmd.Positional(0, "archive"));
+            var directory = Path.GetFullPath(cmd.Positional(1, "directory"));
+            output.Detail("Retrieving " + archive + " - this takes minutes, not seconds.");
+
+            var result = Call(executor, "project.retrieve", new
+            {
+                archive,
+                directory,
+                upgrade = cmd.Has("upgrade"),
+            });
+
+            if (output.AsJson) { output.Json(result); return 0; }
+            RenderProject(JsonUtil.To<ProjectDto>(result), output);
             return 0;
         }
 

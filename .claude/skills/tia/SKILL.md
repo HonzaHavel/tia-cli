@@ -1,6 +1,6 @@
 ---
 name: tia
-description: Drive Siemens TIA Portal from the terminal with the `tia` CLI (tia-cli) — open a project, inspect stations, CPUs and program blocks, read and change block code (SCL, XML), manage folders, external sources, tags and tag tables, compile, save, change hardware and CPU settings, open editors on screen, and download to or upload from a PLC or PLCSIM. Use whenever the user asks about a TIA Portal project, a PLC program, S7 blocks (OB/FB/FC/DB), SCL code, PLC tags, or wants something done in TIA Portal from here, even if they do not name tia-cli.
+description: Drive Siemens TIA Portal from the terminal with the `tia` CLI (tia-cli) — open a project, archive it or retrieve an archive (.zap20), inspect stations, CPUs and program blocks, read and change block code (SCL, XML), manage folders, external sources, tags and tag tables, compile, save, change hardware and CPU settings, open editors on screen, and download to or upload from a PLC or PLCSIM. Use whenever the user asks about a TIA Portal project, a PLC program, S7 blocks (OB/FB/FC/DB), SCL code, PLC tags, or wants something done in TIA Portal from here, even if they do not name tia-cli.
 ---
 
 # Using tia-cli
@@ -22,7 +22,8 @@ every command; `tia help` has the exact flags when you need one not shown here.
   - `download`, `sim start` — they **stop and reload a PLC**. Only against a target the user has
     said, in this conversation, is safe to stop. Never add `--force` on your own.
   - `upload`, `sim create`, `device set`, `device protection`, `device ip`.
-  - `block delete`, `folder delete`, `source delete`, `block import --overwrite`, `project save`.
+  - `block delete`, `folder delete`, `source delete`, `block import --overwrite`, `project save`,
+    `project archive --save` / `--overwrite`.
 - **Never invent passwords.** `--secret`, `--plc-password`, `--password` take values only the user
   gives.
 - **Do not run `tia portals` while a session is running** — in 0.1.0 it kills the session's portal
@@ -53,6 +54,18 @@ times. Without one, a project the user opens in the UI is still picked up.
 Project commands: `tia project open <path>` (`--upgrade` for an older version's project),
 `tia project info --json`, `tia project save`, `tia project close` (`--save`).
 `tia project new <dir> <name>` creates one; nothing reaches disk before `project save`.
+
+Archives (`.zap20`, `.zap19`, ... — one file holding a whole project):
+
+```bash
+tia project archive                       # beside the project folder, as <project>.zapNN
+tia project archive D:\backup\Line-Friday # a file (extension added) or an existing folder
+tia project retrieve D:\backup\Line.zap20 C:\work    # unpacks to C:\work\<project>\ and opens it
+```
+
+`archive` refuses unsaved changes (exit 2) unless `--save`, and an existing file unless
+`--overwrite` — both need the user's yes. `--minimize` makes a smaller archive. `retrieve` needs no
+project open in the session and takes `--upgrade` like `open`; `project open` does not read archives.
 
 End: `tia session stop` — closes a portal tia started, leaves the user's alone. Save first if the
 user wants the changes.

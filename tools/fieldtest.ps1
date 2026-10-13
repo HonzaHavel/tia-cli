@@ -70,9 +70,11 @@ if (-not $ProjectDir) {
 # TIA Portal (V20, at least) refuses a project folder longer than 143 characters, and says so only
 # in the daemon's log - the command itself fails with a bare "Error when calling method 'Create'".
 # Checked here so a long -ProjectDir, or a long user name under %TEMP%, fails with the reason.
-$projectFolder = Join-Path $ProjectDir 'FieldTest'
+# The deepest project folder of the run is the one 'project retrieve' unpacks.
+$RetrieveDir   = Join-Path $ProjectDir 'r'
+$projectFolder = Join-Path $RetrieveDir 'FieldTest'
 if ($projectFolder.Length -gt 143) {
-    throw "The test project would be created at $projectFolder ($($projectFolder.Length) characters), and TIA Portal allows at most 143. Pass a shorter -ProjectDir, such as C:\tia-test."
+    throw "The test project would end up at $projectFolder ($($projectFolder.Length) characters), and TIA Portal allows at most 143. Pass a shorter -ProjectDir, such as C:\tia-test."
 }
 
 if (-not (Test-Path -LiteralPath $ExePath)) {
@@ -278,7 +280,7 @@ try {
         foreach ($pending in @(
             @{ n = 'project and hardware'; g = 'core' }, @{ n = 'blocks and tags'; g = 'core' },
             @{ n = 'show verbs';           g = 'ui'   }, @{ n = 'sim start';      g = 'plcsim' },
-            @{ n = 'upload and download';  g = 'plc'  })) {
+            @{ n = 'upload and download';  g = 'plc'  }, @{ n = 'archive and retrieve'; g = 'core' })) {
             Skip -Name $pending.n -Group $pending.g -Why 'the session did not start'
         }
         Note 'If exit 7 came back in under two minutes, an unanswered "Openness access" window is'
@@ -421,6 +423,40 @@ END_FUNCTION_BLOCK
         }
     }
 
+    # ------------------------------------------------------------ archive
+    Head 'Archive and retrieve'
+
+    # Last of the project work on purpose: retrieve leaves the session holding the unpacked copy,
+    # and nothing after this needs more than some project being open.
+    Case -Name 'table add before archive'      -Group core -TiaArgs @('table', 'add', 'PLC_1', 'ArchiveProbe')
+    Case -Name 'archive refuses unsaved changes' -Group core -TiaArgs @('project', 'archive') -Expect @(2)
+    Case -Name 'project archive --save'        -Group core -TiaArgs @('project', 'archive', '--save')
+    $archived = $script:LastPassed
+
+    # The extension follows the TIA version (.zap20, .zap19), so the file is found rather than named.
+    $zap = Get-ChildItem -LiteralPath $ProjectDir -Filter 'FieldTest.zap*' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+
+    if (-not $archived -or -not $zap) {
+        Skip -Name 'archive overwrite and retrieve' -Group core -Why 'no archive was written beside the project folder'
+    } else {
+        Note "archive: $($zap.FullName) ($($zap.Length) bytes)"
+        Case -Name 'archive refuses to overwrite'  -Group core -TiaArgs @('project', 'archive') -Expect @(2)
+        Case -Name 'archive --overwrite --minimize' -Group core -TiaArgs @('project', 'archive', '--overwrite', '--minimize')
+
+        Case -Name 'project close' -Group core -TiaArgs @('project', 'close')
+        Case -Name 'open refuses an archive' -Group core -TiaArgs @('project', 'open', $zap.FullName) -Expect @(2)
+        Case -Name 'project retrieve' -Group core -TiaArgs @('project', 'retrieve', $zap.FullName, $RetrieveDir)
+
+        if ($script:LastPassed) {
+            Case -Name 'devices after retrieve' -Group core -TiaArgs @('devices')
+            Case -Name 'tables after retrieve'  -Group core -TiaArgs @('tables', 'PLC_1')
+        } else {
+            # The regression cases below want a project open; put the original back for them.
+            $original = Get-ChildItem -LiteralPath (Join-Path $ProjectDir 'FieldTest') -Filter 'FieldTest.ap*' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($original) { Case -Name 'reopen after failed retrieve' -Group core -TiaArgs @('project', 'open', $original.FullName) }
+        }
+    }
+
     # ------------------------------------------------------------ regressions
     Head 'Regressions'
 
@@ -437,7 +473,8 @@ END_FUNCTION_BLOCK
 
     foreach ($pending in @(
         @{ n = 'hardware, blocks and tags'; g = 'core'   }, @{ n = 'show verbs';          g = 'ui'  },
-        @{ n = 'sim start';                 g = 'plcsim' }, @{ n = 'upload and download'; g = 'plc' })) {
+        @{ n = 'sim start';                 g = 'plcsim' }, @{ n = 'upload and download'; g = 'plc' },
+        @{ n = 'archive and retrieve';      g = 'core'   })) {
         Skip -Name $pending.n -Group $pending.g -Why 'the test project could not be created'
     }
     Note 'Stopped: the test project could not be created, and carrying on would have changed'
