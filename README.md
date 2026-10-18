@@ -48,12 +48,32 @@ Commands are written against an `IExecutor` and cannot tell the difference.
 
 In order:
 
-1. the session started by `tia session start`, if one is running;
-2. the single TIA Portal already running on this machine;
-3. nothing — the command stops and says so, unless `--start` was given.
+1. the portal named by `--attach <pid>` or `TIA_PORTAL=<pid>` — through the session holding it, or
+   attached for this one command when no session does;
+2. the session started by `tia session start`, if exactly one is running;
+3. the single TIA Portal already running on this machine;
+4. nothing — the command stops and says so, unless `--start` was given.
 
-Two portals running and no session is the one ambiguous case; `tia` refuses to guess and asks for
-`--attach <pid>`. `tia portals` lists what is there.
+`tia` refuses to guess rather than pick one: two portals and no session, or two sessions and no
+portal named, both stop with exit 6 and list what is there.
+
+### Several portals at once
+
+There is one session per TIA Portal, so two projects in two portals can each have a session of
+their own:
+
+```bash
+tia session start --attach 21020          # the portal you have open
+tia session start --new --headless        # and one of tia's own beside it
+tia session list                          # both, with their portal pids
+export TIA_PORTAL=21020                   # point this shell at one of them
+tia project info                          # goes to 21020's session
+tia devices --attach 30364                # or name the portal per command
+tia session stop --attach 30364           # stop one; --all stops every one
+```
+
+With a session already running, `session start` needs `--attach <pid>` or `--new` to start
+another, so two sessions never share a portal.
 
 Whether a portal closes when you are done follows from who started it. One that `tia` started is
 owned by `tia` and closes with the session; one that was already running is left alone. `tia session
@@ -240,8 +260,9 @@ Run `tia help` for the full text.
 | --- | --- |
 | `tia portals` | TIA Portal instances running on this machine |
 | `tia session start` | Start a background session and keep it. `--new`, `--headless`, `--attach <pid>`, `--project <path>`, `--idle <minutes>` |
+| `tia session list` | Every running session and the TIA Portal it holds |
 | `tia session status` | What is running, what it is attached to, what is open |
-| `tia session stop` | End the session |
+| `tia session stop` | End the session. `--attach <pid>` picks one of several, `--all` ends every one |
 | `tia shell` | Interactive prompt holding one session open |
 | `tia project open <path>` | Open a project (`--upgrade`) |
 | `tia project new <dir> <name>` | Create one |
@@ -309,14 +330,13 @@ tia compile PLC_1 || echo "compile failed"
   resolves a method's types when the method starts, not line by line, so the executor is built
   through a deliberate two-step with a `[MethodImpl(NoInlining)]` core. `Program.cs` references
   nothing Openness-backed.
-- **`TiaPortalProcess` has two lifetimes, and the GC knows about neither.** The handles
-  `TiaPortal.GetProcesses()` returns are detached and must be disposed. The one
-  `portal.GetCurrentProcess()` returns shares the portal's lifetime — disposing it disposes the
-  connection. Not disposing it is not enough: the type has a finaliser, so a handle left to become
-  garbage kills the portal at the next collection, seconds later and nowhere near the code that
-  fetched it. When the portal is one this tool started, that closes the process outright — the
-  symptom is a session that works, then reports "no longer running" about a portal that really has
-  gone. The handle is fetched once and held in a field for the life of the session.
+- **Disposing a `TiaPortalProcess` closes that TIA Portal, and so does its finaliser.** That holds
+  for every handle — the ones `TiaPortal.GetProcesses()` returns as much as the one
+  `portal.GetCurrentProcess()` returns — and for a portal somebody else opened: up to 0.3.0,
+  `tia portals` disposed what it listed and closed every portal on the machine, window, project and
+  unsaved work. Leaving a handle to become garbage is no better: the finaliser does the same at the
+  next collection, or at process exit, nowhere near the code that fetched it. So handles are held
+  for as long as their portal is in use and then let go with `GC.SuppressFinalize`, never disposed.
 - **The daemon answers `ping`, `status` and `stop` on the connection thread**, not through the
   Openness queue. So `tia session status` still replies while a project is opening, which is exactly
   when you want to ask.

@@ -17,18 +17,30 @@ exports to the same files.
 
 ## What you need
 
-- tia-cli installed (`tia --version` works in Git Bash), and git
-- The project open in TIA Portal, and **only one** TIA Portal running
-- No other `tia session` running (`tia session status`)
+- tia-cli **newer than 0.3.0** installed (`tia --version` works in Git Bash), and git. Up to 0.3.0,
+  `tia portals` and `tia session start` close the TIA Portal you have open, unsaved work and all.
+- The project open in TIA Portal
 
 ## 1. Connect to the open TIA Portal
 
+Find your portal's pid:
+
 ```bash
-tia session start
+tia portals
 ```
 
-With one portal running, the session joins it and works on whatever project it has open. Your
-window stays yours: `tia session stop` at the end leaves it open.
+Join it, and point this shell at it so every command below goes there, even with other portals or
+sessions running:
+
+```bash
+tia session start --attach 21020
+```
+```bash
+export TIA_PORTAL=21020
+```
+
+The session works on whatever project that portal has open. Your window stays yours: `tia session
+stop` at the end leaves it open. `tia session list` shows every session running.
 
 ```bash
 tia project info

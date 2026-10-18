@@ -22,7 +22,13 @@ namespace TiaCli.Cli
     /// <summary>Routes to a running daemon. Loads no Openness assembly at all.</summary>
     internal sealed class DaemonExecutor : IExecutor
     {
+        private readonly string _pipeName;
         private long _id;
+
+        public DaemonExecutor(string pipeName)
+        {
+            _pipeName = pipeName;
+        }
 
         public string Kind => "daemon";
 
@@ -35,7 +41,7 @@ namespace TiaCli.Cli
                 Params = parameters == null ? (System.Text.Json.JsonElement?)null : JsonUtil.ToElement(parameters),
             };
 
-            return DaemonClient.Send(request);
+            return DaemonClient.Send(_pipeName, request);
         }
 
         public void Dispose() { }

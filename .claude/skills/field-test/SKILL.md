@@ -55,13 +55,14 @@ Step 2 is the one people skip. A session runs its portal in the background, so i
 never been granted the harness stalls and then fails with exit 7 on `session start` — and every
 group after it is recorded as untested.
 
-Start with **no `tia session` running** — the harness refuses otherwise, since sharing a session
-would mean ending it when done. Your own TIA Portals can stay open: the harness always starts a
-portal of its own with `--new`, puts its throwaway project there, and closes only that one.
+Start with **no `tia session` running** — the harness refuses otherwise, since its cleanup ends
+every session with `session stop --all`. Your own TIA Portals can stay open: the harness always
+starts portals of its own with `--new`, puts its throwaway project there, and closes only those.
 
-**Known issue in 0.1.0:** `tia portals` run while a session is up disposes that session's portal —
-every later command fails with exit 9. Until it is fixed, do not run `tia portals` by hand during a
-session; `tia session status` is the safe way to see what is running.
+**Up to 0.3.0, `tia portals` closed every TIA Portal it listed** — including yours, with whatever was
+unsaved in it — so never run a 0.3.0 or older harness with a portal open that matters. From the
+version after, keeping one open is worth doing: the `portals leaves open portals open` case checks
+exactly that, and is skipped when no portal was open before the run.
 
 The harness can also run against an unpacked zip without installing, with `-ExePath` pointing at
 its `tia.exe`. It clears the mark of the web itself in that case, but a later install is then a

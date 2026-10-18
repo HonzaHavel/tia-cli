@@ -33,9 +33,11 @@ USAGE
 
 HOW IT FINDS TIA PORTAL
   Every command needs a portal. In order, tia will:
-    1. use the session started by 'tia session start', if one is running;
-    2. otherwise attach to the single TIA Portal already running on this machine;
-    3. otherwise stop and tell you, unless --start was given.
+    1. use the session holding the portal named by --attach <pid> or TIA_PORTAL, or attach to
+       that portal for this command if no session holds it;
+    2. otherwise use the session started by 'tia session start', if exactly one is running;
+    3. otherwise attach to the single TIA Portal already running on this machine;
+    4. otherwise stop and tell you, unless --start was given.
   Attaching to a portal you opened yourself is the normal case and needs no setup. A portal that
   tia starts belongs to tia, so it only outlives a single command when a session is holding it.
 
@@ -44,11 +46,17 @@ SESSION
                            is one, otherwise launches its own.
       --new                Launch a new portal even if one is already running
       --headless           Launch it without the TIA Portal window (only with a new portal)
-      --attach <pid>       Join this portal specifically
+      --attach <pid>       Join this portal specifically - and start a second session next to
+                           one that is already running
       --project <path>     Open a project as part of starting up
       --idle <minutes>     Stop by itself after this long with nothing to do
+  session list             Every running session and the portal it holds
   session status           What is running, what it is attached to, what is open
   session stop             End the session. A portal tia started closes; one you started stays.
+      --all                End every session
+
+  There is one session per TIA Portal. With several running, a command names its portal with
+  --attach <pid> or TIA_PORTAL=<pid>, and is refused rather than guessed at without one.
   shell                    Interactive prompt holding one session open
   portals                  List the TIA Portal instances running on this machine
 
@@ -153,7 +161,9 @@ ON SCREEN (needs a portal with a window, so not --headless)
 
 GLOBAL OPTIONS
   --json                   Print raw JSON instead of tables
-  --attach <pid>           Attach to a specific portal for this command
+  --attach <pid>           Work on this TIA Portal: through the session holding it, or by
+                           attaching for this command when no session does
+                           TIA_PORTAL=<pid> in the environment does the same for every command
   --start                  Let this command launch its own portal if none is running
   --headless               With --start, launch it without a window
   --new                    Launch a new portal even if one is running

@@ -45,31 +45,24 @@ namespace TiaCli.Daemon
         private int _inFlight;
         private long _lastActivityTicks = DateTime.UtcNow.Ticks;
 
+        private readonly int _processId = System.Diagnostics.Process.GetCurrentProcess().Id;
+        private readonly string _pipeName;
+        private readonly object _advertiseLock = new object();
+        private int _advertisedPortal = -1;
+
         public DaemonServer(ServeOptions options)
         {
             _options = options;
             _host = new SessionHost(options.Acquire);
+            _pipeName = DaemonPaths.PipeNameFor(_processId);
         }
 
         public int Run()
         {
             DaemonPaths.TrimLog();
 
-            if (DaemonClient.IsAvailable(400))
-            {
-                DaemonPaths.Log("refusing to start: a daemon is already listening on " + DaemonPaths.PipeName);
-                return 3;
-            }
-
-            DaemonState.Write(new DaemonState
-            {
-                Pipe = DaemonPaths.PipeName,
-                ProcessId = System.Diagnostics.Process.GetCurrentProcess().Id,
-                StartedAt = _startedAt.ToString("yyyy-MM-dd'T'HH:mm:ss"),
-            });
-
-            DaemonPaths.Log($"daemon up on {DaemonPaths.PipeName} (pid {System.Diagnostics.Process.GetCurrentProcess().Id}, " +
-                            $"openness {OpennessResolver.ResolvedVersion})");
+            Advertise();
+            DaemonPaths.Log($"daemon up on {_pipeName} (pid {_processId}, openness {OpennessResolver.ResolvedVersion})");
 
             try
             {
@@ -117,7 +110,33 @@ namespace TiaCli.Daemon
             }
         }
 
-        private static NamedPipeServerStream CreateInstance()
+        /// <summary>
+        /// Writes this daemon's state file, with the portal it holds once it holds one. Rewritten
+        /// only when that changes, and never after a stop was accepted: the file going away is how
+        /// everyone else learns that this session is leaving.
+        /// </summary>
+        private void Advertise()
+        {
+            lock (_advertiseLock)
+            {
+                if (_stopRequested || _stopping) return;
+
+                var session = _host.Snapshot;
+                var portal = session != null && session.Connected ? session.ProcessId : 0;
+                if (portal == _advertisedPortal) return;
+
+                DaemonState.Write(new DaemonState
+                {
+                    Pipe = _pipeName,
+                    ProcessId = _processId,
+                    StartedAt = _startedAt.ToString("yyyy-MM-dd'T'HH:mm:ss"),
+                    PortalProcessId = portal,
+                });
+                _advertisedPortal = portal;
+            }
+        }
+
+        private NamedPipeServerStream CreateInstance()
         {
             // Only the account that started the daemon may drive it: this pipe is a remote control
             // for an engineering tool that can change and download PLC projects.
@@ -128,7 +147,7 @@ namespace TiaCli.Daemon
                 AccessControlType.Allow));
 
             return new NamedPipeServerStream(
-                DaemonPaths.PipeName,
+                _pipeName,
                 PipeDirection.InOut,
                 MaxInstances,
                 PipeTransmissionMode.Byte,
@@ -218,10 +237,14 @@ namespace TiaCli.Daemon
                     return new { ok = true };
 
                 case "daemon.stop":
-                    _stopRequested = true;
                     // Dropped now rather than in Shutdown, so nothing can find a state file
-                    // describing a daemon that is on its way out.
-                    DaemonState.Delete();
+                    // describing a daemon that is on its way out. Under the lock, so a request
+                    // finishing at the same moment cannot write it back.
+                    lock (_advertiseLock)
+                    {
+                        _stopRequested = true;
+                        DaemonState.Delete(_processId);
+                    }
                     return new { ok = true, stopping = true };
 
                 case "daemon.status":
@@ -234,7 +257,7 @@ namespace TiaCli.Daemon
                         Running = true,
                         Stopping = _stopRequested,
                         ProcessId = System.Diagnostics.Process.GetCurrentProcess().Id,
-                        Pipe = DaemonPaths.PipeName,
+                        Pipe = _pipeName,
                         StartedAt = _startedAt.ToString("yyyy-MM-dd'T'HH:mm:ss"),
                         LogPath = DaemonPaths.LogFile,
                         Session = session,
@@ -246,7 +269,10 @@ namespace TiaCli.Daemon
                 }
 
                 default:
-                    return _host.Invoke(request);
+                    // Advertised whether or not the request succeeded: a failed one can still have
+                    // acquired the portal, or found it gone.
+                    try { return _host.Invoke(request); }
+                    finally { Advertise(); }
             }
         }
 
@@ -286,7 +312,7 @@ namespace TiaCli.Daemon
 
             DaemonPaths.Log("shutting down: " + reason);
             try { _host.Dispose(); } catch (Exception ex) { DaemonPaths.Log("dispose failed: " + ex.Message); }
-            DaemonState.Delete();
+            DaemonState.Delete(_processId);
             DaemonPaths.Log("daemon down");
 
             // The accept loop may be parked inside a pipe wait; there is nothing left worth

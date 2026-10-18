@@ -68,37 +68,49 @@ namespace TiaCli
 
         private static int Run(CommandLine cmd, Output output)
         {
-            // These two manage the daemon itself and must not go through it.
+            // These manage the daemons themselves and must not go through one.
             if (cmd.Verb == "session start") return Session.Start(cmd, output);
             if (cmd.Verb == "session stop") return Session.Stop(cmd, output);
+            if (cmd.Verb == "session list") return Session.List(output);
+            if (cmd.Verb == "session status") return Session.StatusCommand(cmd, output);
 
             using (var executor = CreateExecutor(cmd, output))
             {
-                if (cmd.Verb == "session status") return Session.Status(cmd, executor, output);
                 if (cmd.Verb == "shell") return Shell.Run(executor, output);
                 return Commands.Execute(cmd, executor, output);
             }
         }
 
+        /// <summary>The portal a command names: --attach first, then TIA_PORTAL.</summary>
+        internal static int? TargetPortal(CommandLine cmd) =>
+            cmd.NullableInt("attach") ?? SessionRegistry.PortalFromEnvironment();
+
         /// <summary>
-        /// Picks who does the work. A running session wins, because it already holds a portal - and
-        /// possibly an open project that cost minutes to load.
+        /// Picks who does the work. A session holding the named portal wins - or, with none named,
+        /// the only session running - because it already holds a portal and possibly an open project
+        /// that cost minutes to load. A named portal no session holds is attached to directly.
         /// </summary>
-        private static IExecutor CreateExecutor(CommandLine cmd, Output output)
+        internal static IExecutor CreateExecutor(CommandLine cmd, Output output)
         {
-            if (!cmd.Has("no-daemon") && DaemonClient.IsAvailable())
+            var portal = TargetPortal(cmd);
+
+            if (!cmd.Has("no-daemon"))
             {
-                var ignored = new[] { "attach", "start", "new", "headless", "openness-version" }
-                    .Where(cmd.Has)
-                    .ToList();
-
-                if (ignored.Count > 0)
+                var session = SessionRegistry.Resolve(SessionRegistry.Running(), portal);
+                if (session != null)
                 {
-                    output.Warn("Ignoring " + string.Join(", ", ignored.Select(f => "--" + f)) +
-                                ": the running session decides that. Add --no-daemon to bypass it.");
-                }
+                    var ignored = new[] { "start", "new", "headless", "openness-version" }
+                        .Where(cmd.Has)
+                        .ToList();
 
-                return new DaemonExecutor();
+                    if (ignored.Count > 0)
+                    {
+                        output.Warn("Ignoring " + string.Join(", ", ignored.Select(f => "--" + f)) +
+                                    ": the running session decides that. Add --no-daemon to bypass it.");
+                    }
+
+                    return new DaemonExecutor(session.Pipe);
+                }
             }
 
             // Enumerating processes needs no approval, so warning about a dialog that will not appear
@@ -112,7 +124,7 @@ namespace TiaCli
 
             var options = new AcquireOptions
             {
-                AttachToProcessId = cmd.NullableInt("attach"),
+                AttachToProcessId = portal,
                 AllowCreate = cmd.Has("start") || cmd.Has("new"),
                 ForceCreate = cmd.Has("new"),
                 WithUserInterface = !cmd.Has("headless"),
@@ -146,7 +158,7 @@ namespace TiaCli
             {
                 // Nobody is watching this process's console; the log is the only way this is seen.
                 DaemonPaths.Log("daemon failed to start: " + ex);
-                DaemonState.Delete();
+                DaemonState.Delete(System.Diagnostics.Process.GetCurrentProcess().Id);
                 return 2;
             }
         }

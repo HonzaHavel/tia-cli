@@ -16,18 +16,33 @@ namespace TiaCli.Cli
     {
         public static int Start(CommandLine cmd, Output output)
         {
-            // A session that was just told to stop still answers while it closes TIA Portal. Joining it
-            // would report a session that is gone a moment later - 'session stop; session start' on
-            // one line did exactly that - so one on its way out is waited for, not joined.
-            if (DaemonClient.IsAvailable() && !(IsStopping() && DaemonClient.WaitUntilGone()))
+            // A session that was told to stop deletes its state file at once, so one on its way out is
+            // never found here and never joined - 'session stop; session start' on one line once
+            // reported a session that was gone a moment later.
+            var running = SessionRegistry.Running();
+            var attach = cmd.NullableInt("attach");
+
+            if (attach.HasValue)
             {
-                output.Warn("A tia session is already running. Use 'tia session stop' first, " +
-                            "or 'tia session status' to see it.");
-                return Status(cmd, new DaemonExecutor(), output);
+                var holder = running.FirstOrDefault(s => s.PortalProcessId == attach.Value);
+                if (holder != null)
+                {
+                    output.Warn($"A tia session already holds TIA Portal {attach.Value}.");
+                    return Status(cmd, new DaemonExecutor(holder.Pipe), output);
+                }
+            }
+            else if (!cmd.Has("new") && running.Count > 0)
+            {
+                // Joining "whatever is running" next to an existing session could put two sessions on
+                // one portal. A second session has to say which portal, or ask for a new one.
+                output.Warn("A tia session is already running. To start another, name its TIA Portal " +
+                            "with --attach <pid>, or use --new for a portal of its own.");
+                return running.Count == 1
+                    ? Status(cmd, new DaemonExecutor(running[0].Pipe), output)
+                    : List(output);
             }
 
             var serveArgs = new List<string>();
-            var attach = cmd.NullableInt("attach");
             if (attach.HasValue) serveArgs.Add("--attach " + attach.Value);
             if (cmd.Has("new")) serveArgs.Add("--new");
             if (cmd.Has("headless")) serveArgs.Add("--headless");
@@ -39,9 +54,8 @@ namespace TiaCli.Cli
             if (!Openness.OpennessWhitelist.IsApproved(DaemonPaths.ExecutablePath))
                 output.Warn(Openness.OpennessWhitelist.PendingApprovalNotice);
 
-            DaemonClient.Start(serveArgs.ToArray());
-
-            var executor = new DaemonExecutor();
+            var started = DaemonClient.Start(serveArgs.ToArray());
+            var executor = new DaemonExecutor(started.Pipe);
 
             output.Detail(cmd.Has("new") || cmd.Has("headless")
                 ? "Starting TIA Portal - the first launch takes a minute or two."
@@ -69,30 +83,46 @@ namespace TiaCli.Cli
             return Status(cmd, executor, output);
         }
 
-        private static bool IsStopping()
-        {
-            try
-            {
-                return JsonUtil.To<DaemonStatusDto>(Commands.Call(new DaemonExecutor(), "daemon.status")).Stopping;
-            }
-            catch
-            {
-                // It answered the probe and not the question: it went in between.
-                return true;
-            }
-        }
-
+        /// <summary>
+        /// Stops the session for the named portal, the only one running, or with --all every one.
+        /// Several running and none named is refused: stopping a session can close a TIA Portal.
+        /// </summary>
         public static int Stop(CommandLine cmd, Output output)
         {
-            if (!DaemonClient.IsAvailable())
+            var running = SessionRegistry.Running();
+            List<DaemonState> targets;
+
+            if (cmd.Has("all"))
             {
-                // A state file without a live pipe is what a killed daemon leaves behind.
-                DaemonState.Delete();
-                output.Line("No tia session is running.");
+                targets = running;
+            }
+            else
+            {
+                var portal = Program.TargetPortal(cmd);
+                var target = SessionRegistry.Resolve(running, portal);
+                if (target == null && portal.HasValue)
+                    throw new WireException(WireErrorCodes.NotFound,
+                        $"No tia session holds TIA Portal {portal.Value}.",
+                        "'tia session list' shows the sessions that are running.");
+                targets = target == null ? new List<DaemonState>() : new List<DaemonState> { target };
+            }
+
+            if (targets.Count == 0)
+            {
+                if (output.AsJson) output.JsonValue(new { stopped = 0 });
+                else output.Line("No tia session is running.");
                 return 0;
             }
 
-            var executor = new DaemonExecutor();
+            foreach (var target in targets) StopOne(target, output);
+
+            if (output.AsJson) output.JsonValue(new { stopped = targets.Count });
+            return 0;
+        }
+
+        private static void StopOne(DaemonState target, Output output)
+        {
+            var executor = new DaemonExecutor(target.Pipe);
 
             // Ask before stopping, so the message can say whether TIA Portal is about to close.
             SessionStateDto session = null;
@@ -106,14 +136,10 @@ namespace TiaCli.Cli
 
             // Stopped means gone: the daemon answers for as long as closing TIA Portal takes, and a
             // script's next line should not have to guess when that is over.
-            if (!DaemonClient.WaitUntilGone())
+            if (!DaemonClient.WaitUntilGone(target.Pipe))
                 output.Warn("The session is still closing TIA Portal. Give it a moment before starting another.");
 
-            if (output.AsJson)
-            {
-                output.JsonValue(new { stopped = true });
-                return 0;
-            }
+            if (output.AsJson) return;
 
             if (session != null && session.Connected)
             {
@@ -125,8 +151,79 @@ namespace TiaCli.Cli
             {
                 output.Line("Session stopped.");
             }
+        }
 
+        /// <summary>Every running session and the portal it holds.</summary>
+        public static int List(Output output)
+        {
+            var statuses = new List<DaemonStatusDto>();
+            foreach (var state in SessionRegistry.Running())
+            {
+                try
+                {
+                    statuses.Add(JsonUtil.To<DaemonStatusDto>(
+                        Commands.Call(new DaemonExecutor(state.Pipe), "daemon.status")));
+                }
+                catch
+                {
+                    // Gone between being found and being asked; it is no longer running.
+                }
+            }
+
+            if (output.AsJson) { output.JsonValue(statuses); return 0; }
+
+            if (statuses.Count == 0)
+            {
+                output.Line("No tia session is running.");
+                return 0;
+            }
+
+            output.Table(
+                new[] { "portal", "mode", "project", "origin", "daemon" },
+                statuses.Select(s => new[]
+                {
+                    s.Session != null && s.Session.Connected ? s.Session.ProcessId.ToString() : "-",
+                    s.Session == null || !s.Session.Connected ? "-"
+                        : s.Session.WithUserInterface ? "ui" : "headless",
+                    s.Session?.Project?.Name ?? "-",
+                    s.Session == null || !s.Session.Connected ? "-"
+                        : s.Session.Origin == "created" ? "started by tia" : "already running",
+                    s.ProcessId.ToString(),
+                }).ToList());
             return 0;
+        }
+
+        /// <summary>
+        /// 'session status' on its own: the session for the named portal, the only one, or - when
+        /// several are running and none is named - the list of them, which is the useful answer.
+        /// </summary>
+        public static int StatusCommand(CommandLine cmd, Output output)
+        {
+            var running = SessionRegistry.Running();
+            var portal = Program.TargetPortal(cmd);
+
+            if (!cmd.Has("no-daemon"))
+            {
+                if (!portal.HasValue && running.Count > 1)
+                {
+                    output.Line($"{running.Count} tia sessions are running. Name one with --attach <pid>.");
+                    output.Line();
+                    return List(output);
+                }
+
+                var session = SessionRegistry.Resolve(running, portal);
+                if (session != null) return Status(cmd, new DaemonExecutor(session.Pipe), output);
+
+                if (portal.HasValue && running.Count > 0 && !output.AsJson)
+                {
+                    output.Line($"No tia session holds TIA Portal {portal.Value}; commands naming it attach on their own.");
+                    output.Line();
+                    return List(output);
+                }
+            }
+
+            using (var executor = Program.CreateExecutor(cmd, output))
+                return Status(cmd, executor, output);
         }
 
         public static int Status(CommandLine cmd, IExecutor executor, Output output)

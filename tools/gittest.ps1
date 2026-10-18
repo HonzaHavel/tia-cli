@@ -297,9 +297,9 @@ foreach ($k in $script:Env.Keys) { Note ("{0,-10} {1}" -f $k, $script:Env[$k]) }
 
 $previous = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-try { $sessionState = (& $ExePath session status 2>&1 | Out-String) }
+try { $sessionState = (& $ExePath session list 2>&1 | Out-String) }
 finally { $ErrorActionPreference = $previous }
-if ($sessionState -match 'Session running') {
+if ($sessionState -notmatch 'No tia session is running') {
     throw "A tia session is already running. This test needs one of its own. Save anything open in it, run 'tia session stop', then run this again."
 }
 

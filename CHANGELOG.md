@@ -3,6 +3,35 @@
 Notable changes to tia-cli. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+**Several sessions, one per TIA Portal, picked by the portal's pid.** There was one background
+session per Windows user, so working on two projects in two portals meant stopping one session to
+start the other. Each session now has a pipe and a state file of its own.
+
+- `tia session start --attach <pid>` starts a session for that portal next to any already running,
+  and `--new` one with a portal of its own. A plain `session start` with a session already running
+  says so instead of starting a second, so two sessions never share a portal.
+- `--attach <pid>` on any command now goes to the session holding that portal, and attaches for
+  that one command when none does. Before, a running session made it ignore `--attach`.
+- `TIA_PORTAL=<pid>` in the environment does the same for every command in a shell.
+- With several sessions running and no portal named, commands stop with exit 6 and list the portals,
+  rather than guessing. With exactly one, nothing changes.
+- `tia session list` shows every session, its portal, project and who started it.
+  `tia session stop --attach <pid>` stops one, `--all` stops every one.
+
+### Fixed
+
+**`tia portals` no longer closes the TIA Portals it lists.** Listing disposed the handle Openness
+returns for each portal, and disposing one closes that portal - window, project, unsaved work and
+all. So `tia portals` closed every portal you had open, and `tia session start` with one open
+closed it while looking for it, then failed with "No attachable TIA Portal process with id …". The
+field test never saw it: it only ever lists portals it started itself. Handles are now let go
+without being disposed or finalised, a session that stops leaves an attached portal running, and
+`session start` joins the portal through the handle it found instead of looking it up again.
+
 ## 0.3.0 — 2026-10-18
 
 ### Added

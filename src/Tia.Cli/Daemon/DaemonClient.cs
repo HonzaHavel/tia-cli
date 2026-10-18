@@ -21,11 +21,11 @@ namespace TiaCli.Daemon
     internal static class DaemonClient
     {
         /// <summary>Cheap liveness probe. Used to decide whether to route a command to the daemon.</summary>
-        public static bool IsAvailable(int timeoutMs = 250)
+        public static bool IsAvailable(string pipeName, int timeoutMs = 250)
         {
             try
             {
-                using (var pipe = new NamedPipeClientStream(".", DaemonPaths.PipeName, PipeDirection.InOut))
+                using (var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut))
                 {
                     pipe.Connect(timeoutMs);
                     return true;
@@ -42,10 +42,10 @@ namespace TiaCli.Daemon
         /// while it closes TIA Portal, which takes seconds - long enough for the next command to
         /// find it there. False when it is still around at the end of the wait.
         /// </summary>
-        public static bool WaitUntilGone(int timeoutMs = 60000)
+        public static bool WaitUntilGone(string pipeName, int timeoutMs = 60000)
         {
             var deadline = Environment.TickCount + timeoutMs;
-            while (IsAvailable(200))
+            while (IsAvailable(pipeName, 200))
             {
                 if (Environment.TickCount >= deadline) return false;
                 Thread.Sleep(200);
@@ -58,9 +58,9 @@ namespace TiaCli.Daemon
         /// opening a project takes minutes, and cutting it off would leave the daemon working on a
         /// request nobody is listening for.
         /// </summary>
-        public static WireResponse Send(WireRequest request, int connectTimeoutMs = 3000)
+        public static WireResponse Send(string pipeName, WireRequest request, int connectTimeoutMs = 3000)
         {
-            using (var pipe = new NamedPipeClientStream(".", DaemonPaths.PipeName, PipeDirection.InOut))
+            using (var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut))
             {
                 try
                 {
@@ -98,9 +98,10 @@ namespace TiaCli.Daemon
         /// <summary>
         /// Launches a detached daemon and waits for its pipe to come up. The daemon opens the pipe
         /// before it touches TIA Portal, so this returns quickly even though the portal behind it may
-        /// still be starting - waiting for the portal itself is the caller's next request.
+        /// still be starting - waiting for the portal itself is the caller's next request. The pipe
+        /// is named after the daemon's process id, which is known the moment it starts.
         /// </summary>
-        public static void Start(string[] serveArgs, int readyTimeoutMs = 30000)
+        public static DaemonState Start(string[] serveArgs, int readyTimeoutMs = 30000)
         {
             var exe = DaemonPaths.ExecutablePath;
             var arguments = "--serve " + string.Join(" ", serveArgs);
@@ -126,12 +127,18 @@ namespace TiaCli.Daemon
                     "Could not start the tia daemon: " + ex.Message);
             }
 
+            if (process == null)
+                throw new WireException(WireErrorCodes.DaemonError,
+                    "Could not start the tia daemon: Windows started no process for it.");
+
+            var state = new DaemonState { ProcessId = process.Id, Pipe = DaemonPaths.PipeNameFor(process.Id) };
+
             var deadline = Environment.TickCount + readyTimeoutMs;
             while (Environment.TickCount < deadline)
             {
-                if (IsAvailable(200)) return;
+                if (IsAvailable(state.Pipe, 200)) return state;
 
-                if (process != null && process.HasExited)
+                if (process.HasExited)
                 {
                     throw new WireException(WireErrorCodes.DaemonError,
                         $"The tia daemon exited immediately (code {process.ExitCode}).",

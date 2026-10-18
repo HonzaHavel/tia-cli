@@ -26,18 +26,22 @@ every command; `tia help` has the exact flags when you need one not shown here.
     `project archive --save` / `--overwrite`.
 - **Never invent passwords.** `--secret`, `--plc-password`, `--password` take values only the user
   gives.
-- **Do not run `tia portals` while a session is running** — in 0.1.0 it kills the session's portal
-  (exit 9 on everything after). `tia session status` is the safe way to look.
+- **Up to 0.3.0, `tia portals` and a plain `tia session start` close the user's open TIA
+  Portals**, unsaved work and all. Check `tia --version`; on 0.3.0 or older, never run either while
+  the user has a portal open. Join one with `tia session start --attach <pid>`, taking the pid from
+  the user or Task Manager.
 - **`tia shell` is interactive** — for people, not for you. Use a session instead.
 
 ## 1. Connect
 
-Every command needs a portal and finds one in this order: the background session; else the
-**single** TIA Portal running on the machine; else it stops with exit 3 (unless `--start`).
+Every command needs a portal and finds one in this order: the portal named by `--attach <pid>` or
+`TIA_PORTAL` (through its session, or attached for that command); else the **only** session running;
+else the **single** TIA Portal running on the machine; else it stops with exit 3 (unless `--start`).
+Several sessions, or several portals, and none named is exit 6 — name the portal, never guess.
 
 ```bash
-tia session status --json          # a session? which portal, which project, owned by whom
-tia portals --json                 # only when no session: the portals running, with pids
+tia session list --json            # every session: which portal pid, which project, owned by whom
+tia portals --json                 # the portals running, with pids
 ```
 
 Pick one of three ways to work:
@@ -46,7 +50,7 @@ Pick one of three ways to work:
 | --- | --- |
 | The user has TIA Portal open with the project | Nothing — just run commands. Each attaches and detaches. |
 | Several commands on a project file, nobody has it open | `tia session start --project "C:\p\Line.ap20"` (minutes). `--headless` for no window, `--idle 30` to stop itself. |
-| Two portals running | `--attach <pid>` on each command, or `tia session start --attach <pid>` |
+| Two portals running | `tia session start --attach <pid>` for each one you work on, then `export TIA_PORTAL=<pid>` or `--attach <pid>` per command. `tia session stop --attach <pid>` ends one, `--all` every one. |
 
 A session holds the portal and project between commands, so a 20-step task does not re-attach 20
 times. Without one, a project the user opens in the UI is still picked up.

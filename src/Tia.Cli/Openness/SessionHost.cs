@@ -92,18 +92,8 @@ namespace TiaCli.Openness
             if (_options.AttachToProcessId.HasValue)
                 return _session.Attach(_options.AttachToProcessId.Value);
 
-            var running = _session.ListPortals();
-
-            if (running.Count == 1)
-                return _session.Attach(running[0].ProcessId);
-
-            if (running.Count > 1)
-            {
-                throw new SessionException(WireErrorCodes.Ambiguous,
-                    "Several TIA Portal instances are running: " +
-                    string.Join(", ", running.Select(p => p.ProcessId + " (" + Describe(p) + ")")) + ".",
-                    "Pick one with --attach <pid>.");
-            }
+            var attached = _session.AttachToOnlyPortal();
+            if (attached != null) return attached;
 
             if (_options.AllowCreate)
                 return _session.Create(_options.WithUserInterface);
@@ -112,13 +102,6 @@ namespace TiaCli.Openness
                 "No TIA Portal is running to attach to.",
                 "Start one yourself, or run 'tia session start' to have this tool launch and keep " +
                 "one for you. Add --start to make a single command launch its own throwaway portal.");
-        }
-
-        private static string Describe(PortalProcessDto portal)
-        {
-            return string.IsNullOrEmpty(portal.ProjectPath)
-                ? "no project"
-                : System.IO.Path.GetFileNameWithoutExtension(portal.ProjectPath);
         }
 
         private object Dispatch(WireRequest request)

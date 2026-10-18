@@ -80,7 +80,7 @@ namespace TiaCli.Openness
                     finally
                     {
                         if (own) _ownPortalHandles.Add(p);
-                        else p.Dispose();
+                        else LetGo(p);
                     }
                 })
                 .ToList();
@@ -102,6 +102,58 @@ namespace TiaCli.Openness
                     $"No attachable TIA Portal process with id {processId}.",
                     "Run 'tia portals' to see which instances are running.");
 
+            return Attach(process);
+        }
+
+        /// <summary>
+        /// Joins the only TIA Portal running, through the handle GetProcesses() gave for it rather
+        /// than listing, letting go and looking the id up again. That second lookup is what failed
+        /// with "No attachable TIA Portal process" while listing still disposed its handles - which
+        /// closed the very portal it was about to join. Returns null when nothing is running;
+        /// several running is ambiguous.
+        /// </summary>
+        public SessionStateDto AttachToOnlyPortal()
+        {
+            RequireDisconnected();
+
+            var processes = TiaPortal.GetProcesses().ToList();
+            if (processes.Count == 1) return Attach(processes[0]);
+
+            try
+            {
+                if (processes.Count == 0) return null;
+
+                var described = processes.Select(p =>
+                {
+                    var project = p.ProjectPath == null
+                        ? "no project"
+                        : Path.GetFileNameWithoutExtension(p.ProjectPath.FullName);
+                    return $"{p.Id} ({project})";
+                });
+                throw new SessionException(WireErrorCodes.Ambiguous,
+                    "Several TIA Portal instances are running: " + string.Join(", ", described) + ".",
+                    "Pick one with --attach <pid>.");
+            }
+            finally
+            {
+                foreach (var p in processes) LetGo(p);
+            }
+        }
+
+        /// <summary>
+        /// Drops a handle from GetProcesses() without closing the portal it describes. Disposing one
+        /// closes that TIA Portal - window, project and unsaved work - and so does its finaliser,
+        /// which .NET Framework runs at process exit. 'tia portals' disposed every handle it listed
+        /// and so closed every portal it showed you; 'session start' then could not attach to the
+        /// one it had just closed. Suppressing the finaliser is the only safe way to let go.
+        /// </summary>
+        private static void LetGo(TiaPortalProcess process)
+        {
+            if (process != null) GC.SuppressFinalize(process);
+        }
+
+        private SessionStateDto Attach(TiaPortalProcess process)
+        {
             _portal = process.Attach();
             _attachHandle = process;
             _origin = "attached";
@@ -204,8 +256,13 @@ namespace TiaCli.Openness
                 _portal.Dispose();
                 _portal = null;
             }
-            // Released only after the portal has gone, and only by dropping the reference: disposing
-            // any of these handles disposes the portal, which is the whole reason they are held.
+            // Released only after the portal has gone, and never disposed: disposing any of these
+            // handles disposes the portal, which is the whole reason they are held. A portal we
+            // attached to is the engineer's and stays open, so its handles must not be finalised
+            // either.
+            LetGo(_currentProcess);
+            LetGo(_attachHandle);
+            foreach (var p in _ownPortalHandles) LetGo(p);
             _currentProcess = null;
             _attachHandle = null;
             _ownPortalHandles.Clear();

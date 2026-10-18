@@ -42,6 +42,7 @@ namespace TiaCli.Cli
                     }
 
                     if (cmd.Verb == "session status") Session.Status(cmd, executor, output);
+                    else if (cmd.Verb == "session list") Session.List(output);
                     else Commands.Execute(cmd, executor, output);
                 }
                 catch (WireException ex)

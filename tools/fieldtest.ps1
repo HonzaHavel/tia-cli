@@ -176,7 +176,7 @@ function Case {
 
     if ($pass -and $TiaArgs[0] -eq 'session') {
         if ($TiaArgs[1] -eq 'start') { $script:InSession = $true }
-        if ($TiaArgs[1] -eq 'stop')  { $script:InSession = $false }
+        if ($TiaArgs[1] -eq 'stop' -and $TiaArgs -notcontains '--attach') { $script:InSession = $false }
     }
 
     [void]$script:Results.Add([pscustomobject]@{
@@ -236,12 +236,17 @@ if ($script:Env['openness'] -eq 'none') { throw 'No TIA Portal Openness installa
 # 'session stop', which closes a portal tia started along with anything unsaved in it.
 $previous = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-try { $sessionState = (& $ExePath session status 2>&1 | Out-String) }
+try { $sessionState = (& $ExePath session list 2>&1 | Out-String) }
 finally { $ErrorActionPreference = $previous }
 
-if ($sessionState -match 'Session running') {
-    throw "A tia session is already running. The field test needs one of its own, and sharing yours would end it. Save anything open in it, run 'tia session stop', then run this again."
+# Cleanup ends every session with 'session stop --all', so none may be running beforehand.
+if ($sessionState -notmatch 'No tia session is running') {
+    throw "A tia session is already running. The field test needs the machine to itself, and its cleanup would end yours. Save anything open in it, run 'tia session stop --all', then run this again."
 }
+
+# Portals somebody already had open. 'tia portals' used to close every portal it listed - window,
+# project and unsaved work - and the run checks that these are all still there after it.
+$foreignPortals = @(Get-Process -Name 'Siemens.Automation.Portal' -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
 
 # ---------------------------------------------------------------- consent for PLC writes
 $plcWriteOk = $false
@@ -265,7 +270,23 @@ Case -Name 'version'                      -Group core -TiaArgs @('--version')
 Case -Name 'help'                         -Group core -TiaArgs @('help')
 Case -Name 'unknown verb exits 2'         -Group core -TiaArgs @('nonsense-verb') -Expect @(2)
 Case -Name 'portals lists instances'      -Group core -TiaArgs @('portals')
+
+if ($foreignPortals.Count) {
+    Start-Sleep -Seconds 5
+    $closed = @($foreignPortals | Where-Object { -not (Get-Process -Id $_ -ErrorAction SilentlyContinue) })
+    [void]$script:Results.Add([pscustomobject]@{
+        Name = 'portals leaves open portals open'; Group = 'core'; Command = ''; Expected = ''; Exit = $null
+        Verdict = $(if ($closed.Count) { 'FAIL' } else { 'pass' }); Seconds = 5
+        Output = $(if ($closed.Count) { 'closed: ' + ($closed -join ', ') } else { 'still running: ' + ($foreignPortals -join ', ') })
+        Note = 'Up to 0.3.0, listing a portal closed it.'
+    })
+    Write-Host ("   [{0}] portals leaves open portals open" -f $(if ($closed.Count) { 'FAIL' } else { 'pass' })) -ForegroundColor $(if ($closed.Count) { 'Red' } else { 'Green' })
+} else {
+    Skip -Name 'portals leaves open portals open' -Group core -Why 'no TIA Portal was open before the run; open one to test this'
+}
+
 Case -Name 'session status with none'     -Group core -TiaArgs @('session status')
+Case -Name 'session list with none'       -Group core -TiaArgs @('session', 'list')
 
 # The one-shot path: no session, a headless portal of its own for a single command, gone afterwards.
 # --new keeps it away from any portal already open on this machine. It is also the first real
@@ -273,8 +294,11 @@ Case -Name 'session status with none'     -Group core -TiaArgs @('session status
 Case -Name 'one-shot with its own portal' -Group core -TiaArgs @('catalog', '1214', '--limit', '3', '--new', '--headless', '--no-daemon')
 
 # With several portals open and no session, tia refuses to guess which one is meant. That is a
-# documented behaviour worth checking, and it touches none of those portals.
-$portalCount = @(Get-Process -Name 'Siemens.Automation.Portal' -ErrorAction SilentlyContinue).Count
+# documented behaviour worth checking, and it touches none of those portals. Counted the way tia
+# counts them: Windows also lists portals of another TIA version, which this Openness cannot see,
+# and the one-shot portal above while it is still closing - neither makes a command ambiguous.
+$portalCount = 0
+try { $portalCount = @(& $ExePath portals --json 2>$null | ConvertFrom-Json | ForEach-Object { $_ }).Count } catch { }
 if ($portalCount -gt 1) {
     Case -Name "ambiguous with $portalCount portals open" -Group core -TiaArgs @('devices') -Expect @(6)
 }
@@ -593,6 +617,43 @@ END_FUNCTION
     } else {
         Skip -Name 'session start --project' -Group core -Why 'the first session still holds the test project'
     }
+
+    # ------------------------------------------------------------ several sessions
+    Head 'Several sessions'
+
+    # One session per portal: a second, headless one beside the first. With two running, a command
+    # naming no portal is refused rather than sent to either, --attach and TIA_PORTAL each pick
+    # one, and stopping one leaves the other running.
+    $firstPid = $null
+    try { $firstPid = (& $ExePath session status --json 2>$null | ConvertFrom-Json).session.processId } catch { }
+
+    if ($firstPid) {
+        Case -Name 'second session beside the first' -Group core -TiaArgs @('session', 'start', '--new', '--headless')
+
+        $secondPid = $null
+        try {
+            $secondPid = @(& $ExePath session list --json 2>$null | ConvertFrom-Json | ForEach-Object { $_ } |
+                ForEach-Object { $_.session.processId } | Where-Object { $_ -and $_ -ne $firstPid })[0]
+        } catch { }
+
+        if ($secondPid) {
+            Case -Name 'session list'                      -Group core -TiaArgs @('session', 'list')
+            Case -Name 'no portal named with two sessions' -Group core -TiaArgs @('project', 'info') -Expect @(6)
+            Case -Name 'attach picks a session'            -Group core -TiaArgs @('devices', '--attach', "$firstPid")
+
+            # The second session has no project, so exit 4 is the proof it was the one that answered.
+            $env:TIA_PORTAL = "$secondPid"
+            try { Case -Name 'TIA_PORTAL picks a session' -Group core -TiaArgs @('project', 'info') -Expect @(4) }
+            finally { Remove-Item Env:\TIA_PORTAL -ErrorAction SilentlyContinue }
+
+            Case -Name 'session stop --attach'   -Group core -TiaArgs @('session', 'stop', '--attach', "$secondPid")
+            Case -Name 'first session survives'  -Group core -TiaArgs @('devices')
+        } else {
+            Skip -Name 'session list' -Group core -Why 'the second session did not start, or did not report its portal'
+        }
+    } else {
+        Skip -Name 'second session beside the first' -Group core -Why "session status did not give the portal's process id"
+    }
     } # end of the "session started" branch
 
 } catch {
@@ -612,7 +673,7 @@ END_FUNCTION
 } finally {
     # A session left running owns a TIA Portal that nothing else will close.
     Head 'Cleanup'
-    Case -Name 'session stop' -Group core -TiaArgs @('session', 'stop') | Out-Null
+    Case -Name 'session stop' -Group core -TiaArgs @('session', 'stop', '--all') | Out-Null
 
     if (-not $KeepProject) {
         # The portal keeps the project's files locked for a few seconds after 'session stop' returns.

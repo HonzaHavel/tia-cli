@@ -32,7 +32,7 @@ namespace TiaCli.Tests
         }
 
         /// <summary>Verbs handled outside the Commands switch, so absent from it by design.</summary>
-        private static readonly string[] HandledElsewhere = { "session start", "session stop", "session status", "shell" };
+        private static readonly string[] HandledElsewhere = { "session start", "session stop", "session status", "session list", "shell" };
 
         /// <summary>Kept working for people who learned it before 'source add' existed.</summary>
         private static readonly string[] UndocumentedAliases = { "scl import" };
