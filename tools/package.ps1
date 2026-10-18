@@ -73,7 +73,7 @@ try {
     Copy-Item (Join-Path $PSScriptRoot 'uninstall.ps1') $folder -Force
     Copy-Item (Join-Path $PSScriptRoot 'repair.ps1') $folder -Force
     Copy-Item (Join-Path $repo 'README.md') $folder -Force
-    foreach ($extra in @('LICENSE', 'LICENSE.txt', 'LICENSE.md', 'CHANGELOG.md')) {
+    foreach ($extra in @('LICENSE', 'LICENSE.txt', 'LICENSE.md', 'CHANGELOG.md', 'GIT-WORKFLOW.md')) {
         $path = Join-Path $repo $extra
         if (Test-Path $path) { Copy-Item $path $folder -Force }
     }

@@ -3,9 +3,14 @@
 Notable changes to tia-cli. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.3.0 — 2026-10-18
 
 ### Added
+
+**`GIT-WORKFLOW.md`: the program in git, compiled in TIA.** A Git Bash runbook, shipped in the zip,
+for keeping an existing project's blocks and tag tables in a git repository: export from the open
+portal, edit in VS Code, import only what git says changed, compile, and commit only when that is
+clean. It replaces the VCI add-in for the program side; hardware stays in the project.
 
 **`project archive` and `project retrieve`.** A project is a folder of several hundred files; the
 thing people actually pass around and back up is the single `.zapNN` archive, and making or opening
