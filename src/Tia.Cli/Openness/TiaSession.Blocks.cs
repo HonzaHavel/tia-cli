@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Siemens.Engineering;
 using Siemens.Engineering.SW;
@@ -120,9 +121,36 @@ namespace TiaCli.Openness
 
             var file = Fresh(targetPath);
             block.Export(file, ExportOptions.None);
+            DropCreatedStamp(file);
             file.Refresh();
 
             return Read(block.Name, file, inline, maxInlineChars);
+        }
+
+        private static readonly Regex CreatedStamp =
+            new Regex(@"^[ \t]*<Created>[^<]*</Created>[ \t]*\r?\n", RegexOptions.Multiline);
+
+        /// <summary>
+        /// TIA stamps every export with the moment it was made, so the same block exported twice is
+        /// two different files and every commit of a repository of exports shows each XML block as
+        /// changed. The stamp is information about the export, not the block, and import does not
+        /// read it. Only the one inside DocumentInfo goes; anything after that belongs to the block.
+        /// </summary>
+        internal static string WithoutCreatedStamp(string xml)
+        {
+            var stamp = CreatedStamp.Match(xml);
+            var infoEnd = xml.IndexOf("</DocumentInfo>", StringComparison.Ordinal);
+            if (!stamp.Success || infoEnd < 0 || stamp.Index > infoEnd) return xml;
+            return xml.Remove(stamp.Index, stamp.Length);
+        }
+
+        private static void DropCreatedStamp(FileInfo file)
+        {
+            var bytes = File.ReadAllBytes(file.FullName);
+            var bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+            var text = File.ReadAllText(file.FullName);
+            var stable = WithoutCreatedStamp(text);
+            if (stable != text) File.WriteAllText(file.FullName, stable, new UTF8Encoding(bom));
         }
 
         /// <summary>

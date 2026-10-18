@@ -24,6 +24,14 @@ one meant going through the TIA Portal menus.
 
 ### Fixed
 
+**The same block exported twice is the same file.** TIA stamps every XML export with the moment it
+was made, so a repository of exports showed every LAD and FBD block as changed on every commit.
+`block export` now drops that `<Created>` line; import never read it.
+
+**Compile errors say which block they are in.** TIA names the block on a parent message and only
+the position on the error itself, so `tia compile` printed `2` where it meant line 2 of `Twice`. The
+`where` column now shows `Program blocks/Twice/2`, and `--json` carries it as `location`.
+
 **`session stop; session start` on one line starts a session.** A session told to stop keeps
 answering its pipe while it closes TIA Portal, and a `session start` arriving in those seconds found
 it, said a session was already running, exited 0 — and left you with nothing a moment later. That
@@ -31,6 +39,12 @@ was the documented way to recover from exit 9. `session stop` now returns once t
 actually gone, and `session start` waits for one that is on its way out instead of joining it.
 
 ### Changed
+
+**`tools/gittest.ps1` tests the program as a git repository.** It exports a throwaway project to
+text files, edits them the way an editor would, imports only what git says changed, compiles, and
+commits only when that is clean — then checks that exports are stable, that TIA gives back what was
+edited, that broken SCL is caught before commit, and that a project rebuilt from the repository alone
+exports to the same files. Like the field test it ships separately from the zip.
 
 **The field test covers every verb.** `tools/fieldtest.ps1` gained the cases it was missing — device
 attributes and protection, tag and table listings, stdin and `--no-generate` sources, `--print` and

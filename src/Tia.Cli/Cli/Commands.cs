@@ -1066,7 +1066,7 @@ namespace TiaCli.Cli
                     interesting.Take(cap).Select(m => new[]
                     {
                         m.State,
-                        Output.Truncate(m.Path, 40),
+                        Output.TruncateStart(m.Location ?? m.Path, 40),
                         Output.Truncate(m.Description, 90),
                     }).ToList());
 

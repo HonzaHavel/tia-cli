@@ -117,6 +117,14 @@ namespace TiaCli.Cli
             return flat.Length <= max ? flat : flat.Substring(0, max - 1) + "…";
         }
 
+        /// <summary>Like Truncate, but keeps the end - for paths, where the last part is the one that matters.</summary>
+        public static string TruncateStart(string value, int max)
+        {
+            if (string.IsNullOrEmpty(value)) return string.Empty;
+            var flat = value.Replace("\r", " ").Replace("\n", " ").Trim();
+            return flat.Length <= max ? flat : "…" + flat.Substring(flat.Length - (max - 1));
+        }
+
         private static void Write(ConsoleColor colour, string text) => WriteTo(Console.Out, colour, text);
 
         private static void WriteTo(System.IO.TextWriter writer, ConsoleColor colour, string text)

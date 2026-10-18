@@ -188,6 +188,12 @@ namespace TiaCli.Protocol
     {
         public string State { get; set; }
         public string Path { get; set; }
+        /// <summary>
+        /// Path joined to the paths of the messages above it, below the device: "Program blocks/Twice/2"
+        /// where Path alone is "2". TIA names the block on a parent message and only the position on
+        /// the one with the error, so without this an error does not say which block it is in.
+        /// </summary>
+        public string Location { get; set; }
         public string Description { get; set; }
     }
 }

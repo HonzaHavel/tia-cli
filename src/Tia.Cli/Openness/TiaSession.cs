@@ -1884,21 +1884,30 @@ namespace TiaCli.Openness
         }
 
         private static void FlattenMessages(CompilerResultMessageComposition messages,
-            List<CompileMessageDto> sink)
+            List<CompileMessageDto> sink, string parent = null, bool top = true)
         {
             if (messages == null) return;
 
             foreach (CompilerResultMessage message in messages)
             {
+                // The top level is the device itself, which the caller already named.
+                var location = top ? null : JoinLocation(parent, message.Path);
                 sink.Add(new CompileMessageDto
                 {
                     State = message.State.ToString(),
                     Path = message.Path,
+                    Location = location,
                     Description = message.Description,
                 });
                 // Nested messages carry the actual errors; a flat read reports success wrongly.
-                FlattenMessages(message.Messages, sink);
+                FlattenMessages(message.Messages, sink, location, top: false);
             }
+        }
+
+        internal static string JoinLocation(string parent, string path)
+        {
+            if (string.IsNullOrWhiteSpace(path)) return parent;
+            return string.IsNullOrEmpty(parent) ? path : parent + "/" + path;
         }
 
         private static DeviceDto Describe(Device device)
