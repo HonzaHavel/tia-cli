@@ -105,7 +105,8 @@ Requirements and everything else are in README.md.
     Compress-Archive -Path $folder -DestinationPath $zip -CompressionLevel Optimal
 
     $hash = (Get-FileHash -Path $zip -Algorithm SHA256).Hash.ToLowerInvariant()
-    "$hash  $(Split-Path $zip -Leaf)" | Set-Content -Path "$zip.sha256" -Encoding utf8
+    # No BOM and an LF ending: 'sha256sum -c' rejects the file outright with either of those.
+    [IO.File]::WriteAllText("$zip.sha256", "$hash  $(Split-Path $zip -Leaf)`n", (New-Object Text.UTF8Encoding($false)))
 
     $size = [Math]::Round((Get-Item $zip).Length / 1KB)
     Write-Host ''
