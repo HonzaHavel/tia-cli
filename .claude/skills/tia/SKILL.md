@@ -11,7 +11,8 @@ every command; `tia help` has the exact flags when you need one not shown here.
 
 ## Ground rules
 
-- **Pass `--json`** whenever you will read the output. Tables are for people.
+- **Pass `--json`** whenever you will read the output. Tables are for people. The one exception is
+  `tia tags`, which always prints CSV and refuses `--json`.
 - **Slow is normal.** `project open` and `session start --project` take minutes; compile, download
   and anything that exports a block (`block show`, `block source`) take seconds to minutes. Use a
   10-minute timeout and do not retry because it is slow.
@@ -21,7 +22,7 @@ every command; `tia help` has the exact flags when you need one not shown here.
 - **Ask first, every time,** before:
   - `download`, `sim start` — they **stop and reload a PLC**. Only against a target the user has
     said, in this conversation, is safe to stop. Never add `--force` on your own.
-  - `upload`, `sim create`, `device set`, `device protection`, `device ip`.
+  - `upload`, `sim create`, `device set`, `device protection`, `device ip`, `hw import`.
   - `block delete`, `folder delete`, `source delete`, `block import --overwrite`, `project save`,
     `project archive --save` / `--overwrite`.
 - **Never invent passwords.** `--secret`, `--plc-password`, `--password` take values only the user
@@ -38,6 +39,16 @@ Every command needs a portal and finds one in this order: the portal named by `-
 `TIA_PORTAL` (through its session, or attached for that command); else the **only** session running;
 else the **single** TIA Portal running on the machine; else it stops with exit 3 (unless `--start`).
 Several sessions, or several portals, and none named is exit 6 — name the portal, never guess.
+
+**Inside a workspace** (any folder below one holding `.tia/config`), commands go to the portal that
+has the workspace's own project open and stop with exit 3 when none has; an `--attach` or
+`TIA_PORTAL` naming another portal is refused. `tia workspace` shows the state; `tia open` starts
+TIA Portal with `.tia/project` (or retrieves `.tia/archive` into it) and exits — it can take
+minutes, and needs no session afterwards. With `station:` in `.tia/config`, the `<dev>` argument may
+be left out. `tia export` writes the program into `source/<station>/` (`Program blocks/`,
+`PLC data types/` as `.udt`, `PLC tags/` as `.csv`); `tia sync` brings what git says changed there
+back into TIA and compiles - exit non-zero means a file or the compile failed, so do not commit. Do not reach for `--no-workspace` to get past exit 3 or the refusal: it would send the
+command to some other project.
 
 ```bash
 tia session list --json            # every session: which portal pid, which project, owned by whom
@@ -83,9 +94,13 @@ tia blocks <dev> --type FB,FC --filter Motor --json    # --system includes syste
 tia block show <dev> <block> --json       # header, full interface, network titles
 tia block source <dev> <block>            # the code as SCL / STL / DB text; --deps adds the UDTs it uses
 tia block export <dev> <block> --print    # Openness XML — the only form for LAD, FBD and GRAPH
+tia block export <dev> --all --source --out <dir>   # every block at once, text where it exists
 tia sources <dev> --json                  # external source files in the project
 tia tables <dev> --json                   # tag tables
-tia tags <dev> --table <t> --json         # tags, all tables if --table omitted
+tia tags <dev> --table <t>                # tags as CSV (never JSON); all tables, with a Table column, if --table omitted
+tia table export <dev> <t> --out t.csv    # one table's CSV; --all for every table. 'table import <dev> t.csv' takes it back
+tia types <dev> --json                    # PLC data types (UDTs)
+tia type export <dev> <type> --out T.udt  # one type as .udt text; --all for every type. 'type import <dev> T.udt' generates it
 tia device attrs <dev> --filter <text>    # the CPU's Openness attributes and values
 ```
 
@@ -153,7 +168,12 @@ tia catalog "1516-3" --json               # order numbers / type identifiers (--
 tia device add "OrderNumber:6ES7 516-3AN02-0AB0/V2.9" PLC_2    # --device-name <n>
 tia device ip <dev> --address 192.168.0.10 --mask 255.255.255.0 --subnet PN_1   # --router <ip> | --no-router
 tia device set <dev> <attribute> <value>  # names come from device attrs; they differ by TIA version
+tia hw export line.aml                    # hardware as CAx/AutomationML; --device <dev> for one station
+tia hw import line.aml                    # --existing retain (default) | overwrite | park
 ```
+
+CAx is the native way to move hardware between projects, but it does not carry everything:
+`tools/caxtest.sh` reports what a round trip loses. Treat an import as a starting point to check.
 
 Changing hardware needs a STEP 7 licence; without one these exit 8.
 

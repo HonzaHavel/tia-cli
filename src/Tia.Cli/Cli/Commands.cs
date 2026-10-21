@@ -27,6 +27,9 @@ namespace TiaCli.Cli
                 case "project archive": return ProjectArchive(cmd, executor, output);
                 case "project retrieve": return ProjectRetrieve(cmd, executor, output);
 
+                case "hw export": return HardwareExport(cmd, executor, output);
+                case "hw import": return HardwareImport(cmd, executor, output);
+
                 case "devices": return Devices(executor, output);
                 case "catalog": return Catalog(cmd, executor, output);
                 case "device add": return DeviceAdd(cmd, executor, output);
@@ -52,6 +55,12 @@ namespace TiaCli.Cli
                 case "tables": return Tables(cmd, executor, output);
                 case "tags": return Tags(cmd, executor, output);
                 case "table add": return TableAdd(cmd, executor, output);
+                case "table export": return ProgramCommands.TableExport(cmd, executor, output);
+                case "table import": return ProgramCommands.TableImport(cmd, executor, output);
+
+                case "types": return ProgramCommands.Types(cmd, executor, output);
+                case "type export": return ProgramCommands.TypeExport(cmd, executor, output);
+                case "type import": return ProgramCommands.TypeImport(cmd, executor, output);
                 case "tag add": return TagAdd(cmd, executor, output);
 
                 case "show hw": return Show(cmd, executor, output, "ui.showHardware", new
@@ -60,17 +69,17 @@ namespace TiaCli.Cli
                 });
                 case "show device": return Show(cmd, executor, output, "ui.showDevice", new
                 {
-                    device = cmd.Positional(0, "device"),
+                    device = cmd.Positional(0, "station"),
                     view = cmd.Value("view"),
                 });
                 case "show block": return Show(cmd, executor, output, "ui.showBlock", new
                 {
-                    device = cmd.Positional(0, "device"),
+                    device = cmd.Positional(0, "station"),
                     block = cmd.Positional(1, "block"),
                 });
                 case "show table": return Show(cmd, executor, output, "ui.showTagTable", new
                 {
-                    device = cmd.Positional(0, "device"),
+                    device = cmd.Positional(0, "station"),
                     table = cmd.Positional(1, "table"),
                 });
 
@@ -83,7 +92,7 @@ namespace TiaCli.Cli
 
                 case "download": return Transfer(cmd, executor, output, "plc.download", new
                 {
-                    device = cmd.Positional(0, "device"),
+                    device = cmd.Positional(0, "station"),
                     mode = cmd.Value("via"),
                     pcInterface = cmd.Value("interface"),
                     slot = cmd.Int("slot", 1),
@@ -105,7 +114,7 @@ namespace TiaCli.Cli
                 });
                 case "sim start": return Transfer(cmd, executor, output, "sim.start", new
                 {
-                    device = cmd.Positional(0, "device"),
+                    device = cmd.Positional(0, "station"),
                     address = cmd.Value("address"),
                     pcInterface = cmd.Value("interface"),
                     slot = cmd.Int("slot", 1),
@@ -308,6 +317,77 @@ namespace TiaCli.Cli
             return 0;
         }
 
+        private static int HardwareExport(CommandLine cmd, IExecutor executor, Output output)
+        {
+            var result = Call(executor, "hardware.export", new
+            {
+                path = Path.GetFullPath(cmd.Positional(0, "file")),
+                device = cmd.Value("device"),
+            });
+            return RenderCax(result, output, cax =>
+                $"{cax.Device ?? "Hardware"} -> {cax.FilePath} ({cax.Bytes:n0} bytes)");
+        }
+
+        private static int HardwareImport(CommandLine cmd, IExecutor executor, Output output)
+        {
+            var result = Call(executor, "hardware.import", new
+            {
+                path = Path.GetFullPath(cmd.Positional(0, "file")),
+                existing = cmd.Value("existing"),
+            });
+            return RenderCax(result, output, cax => $"Imported {cax.FilePath}");
+        }
+
+        /// <summary>
+        /// CAx reports like the compiler: a tree whose groups repeat the worst state below them. The
+        /// whole tree goes out with --json; the table keeps what is not plain information. Errors
+        /// make the exit non-zero, so a script can tell an import that dropped a module from one
+        /// that did not.
+        /// </summary>
+        private static int RenderCax(JsonElement result, Output output, Func<CaxResultDto, string> headline)
+        {
+            var cax = JsonUtil.To<CaxResultDto>(result);
+            if (output.AsJson) { output.Json(result); return cax.ErrorCount > 0 ? 1 : 0; }
+
+            output.Line(headline(cax));
+            output.Line($"{cax.State}: {cax.ErrorCount} error(s), {cax.WarningCount} warning(s)");
+
+            var notable = CaxLeaves(cax.Messages)
+                .Where(m => !string.IsNullOrWhiteSpace(m.Message) &&
+                            !string.Equals(m.State, "Information", StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(m.State, "Success", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            const int cap = 40;
+            if (notable.Count > 0)
+            {
+                output.Table(
+                    new[] { "state", "message" },
+                    notable.Take(cap).Select(m => new[] { m.State, Output.Truncate(m.Message, 110) }).ToList());
+                if (notable.Count > cap)
+                    output.Detail($"...and {notable.Count - cap} more. Use --json for all of them.");
+            }
+
+            return cax.ErrorCount > 0 ? 1 : 0;
+        }
+
+        /// <summary>
+        /// The messages nothing is nested under. A group - "PLC_1 is being exported." - carries the
+        /// worst state of everything below it, so one skipped tag labelled every line above it as an
+        /// error. Only the leaves say what happened.
+        /// </summary>
+        internal static List<CaxMessageDto> CaxLeaves(IList<CaxMessageDto> messages)
+        {
+            var leaves = new List<CaxMessageDto>();
+            if (messages == null) return leaves;
+            for (var i = 0; i < messages.Count; i++)
+            {
+                var hasChild = i + 1 < messages.Count && messages[i + 1].Depth > messages[i].Depth;
+                if (!hasChild) leaves.Add(messages[i]);
+            }
+            return leaves;
+        }
+
         private static void RenderProject(ProjectDto project, Output output)
         {
             if (project == null) return;
@@ -405,7 +485,7 @@ namespace TiaCli.Cli
 
             var result = Call(executor, "device.setIp", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 address = cmd.Value("address"),
                 subnet = cmd.Value("subnet"),
                 // --subnet-mask is accepted too: --subnet already means the named TIA subnet here,
@@ -436,7 +516,7 @@ namespace TiaCli.Cli
 
         private static int Blocks(CommandLine cmd, IExecutor executor, Output output)
         {
-            var device = cmd.Positional(0, "device");
+            var device = cmd.Positional(0, "station");
             var filter = cmd.Value("filter");
             var type = cmd.Value("type");
             var system = cmd.Has("system");
@@ -520,7 +600,7 @@ namespace TiaCli.Cli
         {
             var result = Call(executor, "block.show", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 block = cmd.Positional(1, "block"),
             });
 
@@ -607,7 +687,9 @@ namespace TiaCli.Cli
         private static int BlockExport(CommandLine cmd, IExecutor executor, Output output,
             bool asSource)
         {
-            var device = cmd.Positional(0, "device");
+            if (cmd.Has("all")) return BlockExportAll(cmd, executor, output, asSource || cmd.Has("source"));
+
+            var device = cmd.Positional(0, "station");
             var block = cmd.Positional(1, "block");
             // Source is normally wanted on the terminal, XML normally on disk.
             var print = asSource ? !cmd.Has("out") : cmd.Has("print");
@@ -659,11 +741,38 @@ namespace TiaCli.Cli
             return 0;
         }
 
+        /// <summary>
+        /// Every block of the station into a directory that mirrors the program folders. Files
+        /// already there are overwritten but never deleted, so a block removed from the project
+        /// leaves its old file behind.
+        /// </summary>
+        private static int BlockExportAll(CommandLine cmd, IExecutor executor, Output output,
+            bool asSource)
+        {
+            var device = cmd.Positional(0, "station");
+            if (cmd.PositionalOrNull(1) != null)
+                throw new WireException(WireErrorCodes.InvalidRequest,
+                    "--all exports every block; give a device and no block name.");
+
+            var directory = ProgramCommands.AllDirectory(cmd, device, out var underRoot);
+            var result = Call(executor, "block.exportAll", new
+            {
+                device,
+                directory,
+                asSource,
+                filter = cmd.Value("filter"),
+                type = cmd.Value("type"),
+                underRoot,
+            });
+
+            return ProgramCommands.PrintAll(result, "block(s)", output);
+        }
+
         private static int BlockImport(CommandLine cmd, IExecutor executor, Output output)
         {
             var result = Call(executor, "block.import", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 filePath = Path.GetFullPath(cmd.Positional(1, "file")),
                 folder = cmd.Value("folder"),
                 overwrite = cmd.Has("overwrite"),
@@ -689,7 +798,7 @@ namespace TiaCli.Cli
         {
             var result = Call(executor, "block.rename", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 block = cmd.Positional(1, "block"),
                 newName = cmd.Positional(2, "new name"),
             });
@@ -704,7 +813,7 @@ namespace TiaCli.Cli
 
         private static int BlockDelete(CommandLine cmd, IExecutor executor, Output output)
         {
-            var device = cmd.Positional(0, "device");
+            var device = cmd.Positional(0, "station");
             var name = cmd.Positional(1, "block");
 
             if (!Confirm(cmd, output, $"Delete block '{name}' from {device}?")) return 2;
@@ -722,7 +831,7 @@ namespace TiaCli.Cli
         {
             var result = Call(executor, "block.createFolder", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 folder = cmd.Positional(1, "path"),
             });
 
@@ -736,7 +845,7 @@ namespace TiaCli.Cli
 
         private static int FolderDelete(CommandLine cmd, IExecutor executor, Output output)
         {
-            var device = cmd.Positional(0, "device");
+            var device = cmd.Positional(0, "station");
             var path = cmd.Positional(1, "path");
 
             if (!Confirm(cmd, output, $"Delete folder '{path}' and everything in it?")) return 2;
@@ -777,7 +886,7 @@ namespace TiaCli.Cli
 
         private static int Sources(CommandLine cmd, IExecutor executor, Output output)
         {
-            var result = Call(executor, "source.list", new { device = cmd.Positional(0, "device") });
+            var result = Call(executor, "source.list", new { device = cmd.Positional(0, "station") });
             if (output.AsJson) { output.Json(result); return 0; }
 
             var sources = JsonUtil.To<List<SourceDto>>(result);
@@ -791,7 +900,7 @@ namespace TiaCli.Cli
 
         private static int SourceAdd(CommandLine cmd, IExecutor executor, Output output)
         {
-            var device = cmd.Positional(0, "device");
+            var device = cmd.Positional(0, "station");
             var name = cmd.Positional(1, "name");
             var file = cmd.Value("file");
             var code = cmd.Value("code");
@@ -825,7 +934,7 @@ namespace TiaCli.Cli
         {
             var result = Call(executor, "source.generate", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 name = cmd.Positional(1, "name"),
                 folder = cmd.Value("folder"),
             });
@@ -838,7 +947,7 @@ namespace TiaCli.Cli
 
         private static int SourceDelete(CommandLine cmd, IExecutor executor, Output output)
         {
-            var device = cmd.Positional(0, "device");
+            var device = cmd.Positional(0, "station");
             var name = cmd.Positional(1, "name");
 
             if (!Confirm(cmd, output, $"Delete source '{name}' from {device}?")) return 2;
@@ -872,7 +981,7 @@ namespace TiaCli.Cli
 
         private static int Tables(CommandLine cmd, IExecutor executor, Output output)
         {
-            var result = Call(executor, "tag.listTables", new { device = cmd.Positional(0, "device") });
+            var result = Call(executor, "tag.listTables", new { device = cmd.Positional(0, "station") });
             if (output.AsJson) { output.Json(result); return 0; }
 
             var tables = JsonUtil.To<List<TagTableDto>>(result);
@@ -889,27 +998,36 @@ namespace TiaCli.Cli
             return 0;
         }
 
+        /// <summary>
+        /// Tags are printed as CSV, the same as a tag table's file: readable as it is, opens in Excel,
+        /// and with --table it is a file 'tia table import' takes back. There is no JSON for tags.
+        /// </summary>
         private static int Tags(CommandLine cmd, IExecutor executor, Output output)
         {
+            if (output.AsJson)
+                throw new WireException(WireErrorCodes.InvalidRequest,
+                    "'tia tags' prints CSV, not JSON.",
+                    "Drop --json. With --table <name> the output is the table's own CSV file.");
+
+            var table = cmd.Value("table");
             var result = Call(executor, "tag.list", new
             {
-                device = cmd.Positional(0, "device"),
-                table = cmd.Value("table"),
+                device = cmd.Positional(0, "station"),
+                table,
             });
 
-            if (output.AsJson) { output.Json(result); return 0; }
-
             var tags = JsonUtil.To<List<TagDto>>(result);
-            output.Table(
-                new[] { "tag", "type", "address", "table", "comment" },
-                tags.Select(t => new[]
-                {
-                    t.Name,
-                    t.DataType ?? "-",
-                    t.LogicalAddress ?? "-",
-                    t.TableName,
-                    Output.Truncate(t.Comment, 40),
-                }).ToList());
+            Console.Write(TagCsv.Write(tags.Select(t => new TagRow
+            {
+                Table = t.TableName,
+                Name = t.Name,
+                DataType = t.DataType,
+                Address = t.LogicalAddress,
+                Comment = t.Comment,
+                HmiVisible = t.HmiVisible,
+                HmiAccessible = t.HmiAccessible,
+                HmiWriteable = t.HmiWriteable,
+            }), withTable: string.IsNullOrEmpty(table)));
 
             return 0;
         }
@@ -918,7 +1036,7 @@ namespace TiaCli.Cli
         {
             var result = Call(executor, "tag.createTable", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 name = cmd.Positional(1, "name"),
             });
 
@@ -931,7 +1049,7 @@ namespace TiaCli.Cli
         {
             var result = Call(executor, "tag.create", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 name = cmd.Positional(1, "name"),
                 table = cmd.Value("table"),
                 dataType = cmd.Value("type"),
@@ -949,7 +1067,7 @@ namespace TiaCli.Cli
 
         private static int DeviceAttributes(CommandLine cmd, IExecutor executor, Output output)
         {
-            var result = Call(executor, "device.attributes", new { device = cmd.Positional(0, "device") });
+            var result = Call(executor, "device.attributes", new { device = cmd.Positional(0, "station") });
             if (output.AsJson) { output.Json(result); return 0; }
 
             var all = JsonUtil.To<List<AttributeDto>>(result);
@@ -976,7 +1094,7 @@ namespace TiaCli.Cli
         {
             var result = Call(executor, "device.setAttribute", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 name = cmd.Positional(1, "attribute"),
                 value = cmd.Positional(2, "value"),
             });
@@ -992,7 +1110,7 @@ namespace TiaCli.Cli
         {
             var result = Call(executor, "device.protection", new
             {
-                device = cmd.Positional(0, "device"),
+                device = cmd.Positional(0, "station"),
                 level = cmd.Value("level"),
                 password = cmd.Value("password"),
                 secret = cmd.Value("secret"),
@@ -1010,14 +1128,15 @@ namespace TiaCli.Cli
 
         private static int SimCreate(CommandLine cmd, IExecutor executor, Output output)
         {
-            var device = cmd.Positional(0, "device");
+            var device = cmd.Positional(0, "station");
             var result = Call(executor, "sim.create", new
             {
                 device,
                 cpu = cmd.Value("cpu"),
                 address = cmd.Value("address"),
                 mask = cmd.Value("mask"),
-                timeout = cmd.Int("timeout", 60000),
+                // Seconds on the command line, as everywhere in tia; the wire keeps milliseconds.
+                timeout = cmd.Int("timeout", 60) * 1000,
             });
             if (output.AsJson) { output.Json(result); return 0; }
 
@@ -1036,9 +1155,9 @@ namespace TiaCli.Cli
 
         // ---------------------------------------------------------------- compile
 
-        private static int Compile(CommandLine cmd, IExecutor executor, Output output)
+        internal static int Compile(CommandLine cmd, IExecutor executor, Output output)
         {
-            var result = Call(executor, "plc.compile", new { device = cmd.Positional(0, "device") });
+            var result = Call(executor, "plc.compile", new { device = cmd.Positional(0, "station") });
             var compile = JsonUtil.To<CompileResultDto>(result);
 
             if (output.AsJson)

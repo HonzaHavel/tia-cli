@@ -1,4 +1,7 @@
+using System.Collections.Generic;
+using System.Linq;
 using TiaCli.Cli;
+using TiaCli.Protocol;
 using TiaCli.Openness;
 using Xunit;
 
@@ -60,6 +63,31 @@ namespace TiaCli.Tests
         public void ACompileMessageCarriesTheBlockAboveIt(string parent, string path, string expected)
         {
             Assert.Equal(expected, TiaSession.JoinLocation(parent, path));
+        }
+
+        [Fact]
+        public void OnlyTheCaxMessagesNothingIsNestedUnderAreShown()
+        {
+            // The shape the field test's export produced: one skipped tag, and every group above it
+            // carrying its Error state.
+            var messages = new List<CaxMessageDto>
+            {
+                new CaxMessageDto { State = "Error", Message = "The export is being processed", Depth = 0 },
+                new CaxMessageDto { State = "Error", Message = "PLC_1 is being exported.", Depth = 1 },
+                new CaxMessageDto { State = "Error", Message = "FieldTags is being exported.", Depth = 2 },
+                new CaxMessageDto { State = "Error", Message = "Spare is being skipped.", Depth = 3 },
+                new CaxMessageDto { State = "Information", Message = "Rack_0 is being exported.", Depth = 2 },
+                new CaxMessageDto { State = "Error", Message = "Exporting of the CAx data is completed (errors: 1)", Depth = 0 },
+            };
+
+            var leaves = Commands.CaxLeaves(messages).Select(m => m.Message).ToList();
+
+            Assert.Equal(new[]
+            {
+                "Spare is being skipped.",
+                "Rack_0 is being exported.",
+                "Exporting of the CAx data is completed (errors: 1)",
+            }, leaves);
         }
 
         [Fact]

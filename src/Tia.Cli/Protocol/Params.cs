@@ -41,6 +41,16 @@ namespace TiaCli.Protocol
             TryGet(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt32(out var i)
                 ? i : fallback;
 
+        /// <summary>The strings of an array parameter; empty when it is missing.</summary>
+        public System.Collections.Generic.List<string> Strings(string name)
+        {
+            var list = new System.Collections.Generic.List<string>();
+            if (!TryGet(name, out var v) || v.ValueKind != JsonValueKind.Array) return list;
+            foreach (var item in v.EnumerateArray())
+                if (item.ValueKind == JsonValueKind.String) list.Add(item.GetString());
+            return list;
+        }
+
         /// <summary>Null when the caller said nothing, which is different from saying false.</summary>
         public bool? NullableBool(string name)
         {

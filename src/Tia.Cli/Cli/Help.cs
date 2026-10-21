@@ -35,9 +35,11 @@ HOW IT FINDS TIA PORTAL
   Every command needs a portal. In order, tia will:
     1. use the session holding the portal named by --attach <pid> or TIA_PORTAL, or attach to
        that portal for this command if no session holds it;
-    2. otherwise use the session started by 'tia session start', if exactly one is running;
-    3. otherwise attach to the single TIA Portal already running on this machine;
-    4. otherwise stop and tell you, unless --start was given.
+    2. inside a workspace, the session or portal that has the workspace's project open - or
+       stop, rather than change some other project;
+    3. otherwise use the session started by 'tia session start', if exactly one is running;
+    4. otherwise attach to the single TIA Portal already running on this machine;
+    5. otherwise stop and tell you, unless --start was given.
   Attaching to a portal you opened yourself is the normal case and needs no setup. A portal that
   tia starts belongs to tia, so it only outlives a single command when a session is holding it.
 
@@ -60,6 +62,28 @@ SESSION
   shell                    Interactive prompt holding one session open
   portals                  List the TIA Portal instances running on this machine
 
+WORKSPACE
+  init [<folder>]          Make a workspace: .tia/ (config, project/, archive/) and source/
+                                 [--name <project>] [--station <station>]
+                                 [--from <project.apNN | archive.zapNN>] copies one in
+  open                     Open the workspace's project in TIA Portal, started like a double-click:
+                           opens .tia/project, else retrieves .tia/archive. Nothing stays running
+                           but TIA itself. A session with no project open takes it instead.
+                                 [--headless] in a session, which then holds the portal
+                                 [--upgrade] [--timeout <seconds>, default 900]
+  workspace                Where the workspace's project, archive and source are, and who has it open
+  export [<station>]       The station's program into source/<station>/, replacing what was there:
+                           Program blocks/ (SCL, STL, DB as text; LAD, FBD, GRAPH as XML),
+                           PLC data types/ (.udt) and PLC tags/ (one .csv per table)
+  sync [<station>]         Bring what git says changed under source/<station>/ into the project,
+                           take out what was deleted, then compile. Exits non-zero on any failure.
+                                 [--file <path>] that file only   [--no-compile]
+
+  Inside a workspace - any folder below one holding .tia/config - commands go to the TIA Portal that
+  has its project open, and refuse when none has, or when --attach or TIA_PORTAL names another.
+  With 'station:' in .tia/config, commands that take a <station> may leave it out.
+  --no-workspace ignores the workspace for one command.
+
 PROJECT
   project open <path>      Open a project (minutes, not seconds)   [--upgrade]
   project new <dir> <name> Create a project
@@ -76,64 +100,99 @@ PROJECT
 HARDWARE
   devices                  List stations, their CPUs and addresses
   catalog <filter>         Search the hardware catalog for order numbers   [--limit <n>]
-  device attrs <device>    List the CPU's Openness attributes             [--filter <text>]
-  device set <device> <attribute> <value>
+  device attrs <station>   List the CPU's Openness attributes             [--filter <text>]
+  device set <station> <attribute> <value>
                            Set one attribute
-  device protection <device>
+  device protection <station>
                            Access level and passwords, which a new CPU needs before it compiles
                                  [--level <FullAccess|ReadAccess|HMIAccess|NoAccess>]
                                  [--password <full access>] [--secret <confidential config data>]
   device add <type> <name> Add a station from a type identifier    [--device-name <n>]
-  device ip <device>       Set the Ethernet address        [--address <ip>] [--mask <netmask>]
+  hw export <file>         Export the hardware configuration as CAx data (AutomationML)
+                                 [--device <station>] one station instead of the whole project
+  hw import <file>         Import CAx data into the open project
+                                 [--existing retain|overwrite|park] for a device already there:
+                                 keep it (default), replace it, or move it to the parking lot
+  device ip <station>      Set the Ethernet address        [--address <ip>] [--mask <netmask>]
                                                            [--subnet <name>] names the TIA subnet
                                                            [--router <ip>] [--no-router]
 
 PROGRAM BLOCKS
-  blocks <device>          List program blocks    [--filter <text>] [--type OB,FB,FC,DB]
+  blocks <station>         List program blocks    [--filter <text>] [--type OB,FB,FC,DB]
                                                   [--tree] shows the folders  [--system]
-  block show <device> <block>
+  block show <station> <block>
                            Header, interface and network titles of one block
-  block source <device> <block>
+  block source <station> <block>
                            Print the block as SCL/STL/DB text   [--out <path>] [--deps]
                            LAD, FBD and GRAPH blocks have no text form - use 'block export'.
-  block export <device> <block>
+                           With --all: the same as 'block export --all --source'.
+  block export <station> <block>
                            Export a block as Openness XML  [--out <path>] [--print]
-  block import <device> <file>
+  block export <station> --all
+                           Every block, one file each, in the program's folders
+                                 [--out <dir>]  [--filter] [--type]
+                                 default: <station>/Program blocks, under source/ in a
+                                 workspace, under the current folder elsewhere
+                                 [--source] SCL/STL/DB blocks as text, the rest as XML
+                                 Overwrites files there but deletes none.
+  block import <station> <file>
                            Import blocks from Openness XML [--folder <path>] [--overwrite]
-  block rename <device> <block> <new name>
+  block rename <station> <block> <new name>
                            Rename a block. Callers are not rewritten; compile to find them.
-  block delete <device> <block>
+  block delete <station> <block>
                            Delete a block                  [--force] skips the question
-  folder add <device> <path>
+  folder add <station> <path>
                            Create a folder, and any missing folder above it
-  folder delete <device> <path>
+  folder delete <station> <path>
                            Delete a folder and everything in it            [--force]
 
   A block is named by a bare name (""Motor"") or by its folder path (""Pumps/Motor""). A bare
   name that two folders both hold is refused rather than guessed at.
 
 EXTERNAL SOURCES
-  sources <device>         List external sources
-  source add <device> <name>
+  sources <station>        List external sources
+  source add <station> <name>
                            Add SCL and compile it into blocks
                                           [--file <path> | --code <text> | stdin]
                                           [--no-generate] keeps the source without compiling
                                           [--folder <path>] puts the blocks in a folder
-  source generate <device> <name>
+  source generate <station> <name>
                            Compile a source already in the project    [--folder <path>]
-  source delete <device> <name>
+  source delete <station> <name>
                            Delete a source. Blocks it made stay.      [--force]
 
-TAGS
-  tables <device>          List tag tables
-  tags <device>            List tags                       [--table <name>]
-  table add <device> <name>
+TAGS (as CSV: Name, Data Type, Logical Address, Comment, Hmi Visible, Hmi Accessible, Hmi Writeable)
+  tables <station>         List tag tables
+  tags <station>           Print tags as CSV; never JSON   [--table <name>] gives that table's
+                           own file, which 'table import' takes back
+  table add <station> <name>
                            Create a tag table
-  tag add <device> <name>  Create a tag       [--table <t>] [--type <dt>] [--address <addr>]
-  compile <device>         Compile the PLC software. Exits non-zero when it reports errors.
+  table export <station> <table>
+                           One tag table as CSV            [--out <file>, default ./<table>.csv]
+  table export <station> --all
+                           Every tag table, in its folders [--out <dir>]
+                                 default: <station>/PLC tags, under source/ in a workspace
+  table import <station> <file.csv>
+                           Make the table hold exactly the file's tags: created, changed, and
+                           deleted when not listed. User constants are left alone.
+                                 [--name <table>, default the file's name] [--folder <path>]
+  tag add <station> <name>
+                           Create a tag       [--table <t>] [--type <dt>] [--address <addr>]
+
+DATA TYPES (as .udt text)
+  types <station>          List PLC data types
+  type export <station> <type>
+                           One data type as .udt           [--out <file>, default ./<type>.udt]
+  type export <station> --all
+                           Every data type, in its folders [--out <dir>]
+                                 default: <station>/PLC data types, under source/ in a workspace
+  type import <station> <file.udt>
+                           Generate the data type(s) in the file   [--folder <path>]
+
+  compile <station>        Compile the PLC software. Exits non-zero when it reports errors.
 
 PLC (online)
-  download <device>        Download to the PLC     [--address <ip>] [--via <mode>, default PN/IE]
+  download <station>       Download to the PLC     [--address <ip>] [--via <mode>, default PN/IE]
                                                    [--interface <name>] [--slot <n>] [--hardware]
                                                    [--changes] [--stopped] [--force] [--target <name>]
                                                    [--secret <master secret>] [--plc-password <pw>]
@@ -142,25 +201,25 @@ PLC (online)
                            Password-protected targets are refused - use the TIA Portal UI.
   upload <ip>              Upload the station at <ip> into the project as a new station
                                                    [--via <mode>] [--interface <name>] [--slot <n>]
-  sim create <device>      Create a PLCSIM instance for the device and power it on
+  sim create <station>     Create a PLCSIM instance for the device and power it on
                                                    [--cpu <type>] [--address <ip>] [--mask <netmask>]
-                                                   [--timeout <ms>]
+                                                   [--timeout <seconds>, default 60]
                            S7-1500 and friends only - PLCSIM's API has no S7-1200. Download to it
-                           afterwards with 'tia download <device>'.
-  sim start <device>       Download to S7-PLCSIM; from V18 start the instance first
+                           afterwards with 'tia download <station>'.
+  sim start <station>      Download to S7-PLCSIM; from V18 start the instance first
                                                    [--address <ip>] [--advanced] [--stopped]
                            Needs S7-PLCSIM installed; PLCSIM Advanced instances take --advanced.
 
 ON SCREEN (needs a portal with a window, so not --headless)
   show hw                  Open the hardware editor    [--view device|network|topology]
-  show device <device>     Open one station in it      [--view device|network|topology]
-  show block <device> <block>
+  show device <station>    Open one station in it      [--view device|network|topology]
+  show block <station> <block>
                            Open a block's editor
-  show table <device> <table>
+  show table <station> <table>
                            Open a tag table
 
 GLOBAL OPTIONS
-  --json                   Print raw JSON instead of tables
+  --json                   Print raw JSON instead of tables (not for 'tags', which is CSV)
   --attach <pid>           Work on this TIA Portal: through the session holding it, or by
                            attaching for this command when no session does
                            TIA_PORTAL=<pid> in the environment does the same for every command
@@ -182,6 +241,9 @@ EXAMPLES
   tia block show PLC_1 Motor                   # interface and networks, without opening TIA
   tia block source PLC_1 Motor > Motor.scl     # round-trips through 'tia source add'
   tia block export PLC_1 Motor --print > Motor.xml
+  tia block export PLC_1 --all --source --out program   # every block, without a workspace
+  tia export && git diff                       # in a workspace: the program as files, and what moved
+  tia sync && git commit -am ""Motor fix""     # bring edits back, compile, commit only if clean
   type block.scl | tia source add PLC_1 Motor
   tia compile PLC_1 && tia project save
   tia show hw --view network                   # put it on screen instead of clicking there

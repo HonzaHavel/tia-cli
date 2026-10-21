@@ -3,6 +3,114 @@
 Notable changes to tia-cli. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+**Workspaces: a folder that knows its project.** A `.tia` folder marks a folder holding one TIA
+project, the way `.git` marks a repository: `.tia/config` (name, TIA version, default station -
+committed), `.tia/project/` (the working project) and `.tia/archive/` (the `.zapNN`, for blob
+storage), with `.tia/.gitignore` keeping those two out of git. The program as files goes in
+`source/` beside it. tia finds the workspace by walking up from the current folder, like git.
+
+- `tia init [<folder>]` makes one, and with `--from` copies an existing project or archive in - the
+  original is left where it was. `--station` sets the default station. The root `.gitignore` is
+  not touched.
+- `tia open` starts TIA Portal with the project the way a double-click does, waits until it is
+  open, and exits. Nothing stays running but TIA itself, which is yours: closing it is closing the
+  window. With only an archive, it retrieves it into `.tia/project/` over one short attach - TIA
+  keeps a project open after the connection that opened it has gone. `--headless` keeps a session
+  instead, since a headless portal closes with whatever started it, and a session already running
+  with no project open is used rather than starting another. The TIA Portal is started through
+  `cmd /c start` by ShellExecute, so it is nobody's child and holds none of tia's handles: stopping
+  the command's process tree leaves it running, and `tia open | ...` returns as soon as tia does.
+  It warns when the project folder's path is long - TIA Portal V20 refused one of 151 characters.
+- Every later command finds the TIA Portal with the workspace's project open and attaches for as
+  long as it runs. Measured on V20: 0.33 s a command, against 0.19 s through a session.
+- `tia workspace` shows where everything is and who has the project open.
+- Inside a workspace, every command goes to the session or portal that has *its* project open,
+  matched by the project file, and stops with exit 3 when none has - instead of acting on whatever
+  other project happens to be open. An `--attach` or `TIA_PORTAL` naming a portal without the
+  project is refused, so a `TIA_PORTAL` left over in the shell cannot send commands to another
+  project. `--no-workspace` ignores the workspace for one command.
+- With `station:` in `.tia/config`, commands that take a station may leave it out: `tia blocks`,
+  `tia block export Motor`, `tia compile`.
+
+**`tia export` and `tia sync`: the program as files, and back.** Inside a workspace, `tia export`
+writes the station's program into `source/<station>/`, in folders named like TIA's tree:
+`Program blocks/` (SCL, STL and DB blocks as text, LAD/FBD/GRAPH as XML), `PLC data types/` (one
+`.udt` per type) and `PLC tags/` (one `.csv` per tag table). It replaces what those three folders
+held, so a block deleted in TIA shows in git as a deleted file. `tia sync` asks git what changed
+there and brings it back: tag tables, then data types, then blocks, then deletions, then a compile
+- and exits non-zero when any file or the compile failed, so `tia sync && git commit` commits only
+what compiled. These replace the bash helpers GIT-WORKFLOW.md used to need.
+
+- Tag tables are CSV with the columns of TIA's own Excel export: `Name`, `Data Type`,
+  `Logical Address`, `Comment`, `Hmi Visible`, `Hmi Accessible`, `Hmi Writeable`. Sync makes the
+  table hold exactly those tags - created, changed, or deleted when gone from the file. User
+  constants are not in the CSV, and are left alone. Comments are in the project's editing language.
+- Text goes into TIA through an external source, which sync removes again once its block or type
+  exists, rather than leaving one per file under "External source files".
+- `--file <path>` brings in one file, git or not - for after `git checkout -- <file>`, when git
+  sees nothing changed. `--no-compile` skips the compile.
+
+**Tag tables and data types on their own.** The parts `tia export` writes can each be written and
+read back by themselves, workspace or not:
+
+- `tia table export <station> <table>` writes one tag table's CSV, `--all` every table;
+  `tia table import <station> <file.csv>` makes a table hold exactly the file's tags.
+- `tia types <station>` lists PLC data types; `tia type export <station> <type>` writes one as
+  `.udt`, `--all` every one; `tia type import <station> <file.udt>` generates it.
+- Every `--all` export - blocks too - now defaults to `<station>/<TIA's folder name>`: under
+  `source/` in a workspace, under the current folder elsewhere. The three parts land side by side
+  the way `tia export` lays them out.
+- `tia source add` of a `.udt` counts the data types it made, instead of reporting "produced no
+  blocks".
+
+**`tia hw export` and `tia hw import`: hardware as CAx data.** The program can live in git as text;
+the hardware could not leave the project except inside an archive. CAx data exchange - AutomationML,
+the format behind TIA Portal's own "Export CAx data" - is the native way to take a hardware
+configuration out of one project and put it into another.
+
+- `hw export <file>` writes the whole project's hardware, `--device <station>` one station.
+- `hw import <file>` reads it into the open project. `--existing` decides what happens to a device
+  already there: `retain` keeps it (the default, since it cannot destroy anything), `overwrite`
+  replaces it, `park` moves it to the parking lot.
+- Both report CAx's own messages and exit non-zero when it reports errors.
+- `tools/caxtest.sh` sends a real project's hardware round trip - export, import into an empty
+  project, export again - and reports what survived: stations, every CPU attribute, a hardware
+  compile, and the two AML files compared. It is how to find out what CAx carries before relying
+  on it.
+
+**`tia block export <station> --all`: the whole program in one command.** Exporting a program meant
+a script calling `block export` once per block. `--all` walks the program in the session and writes
+every block, one file each, into a copy of the program's folders under `--out`. The default is
+`<station>/Program blocks/`, under `source/` inside a workspace and under the current folder
+elsewhere, so the station's folder mirrors TIA's tree.
+
+- `--source` writes SCL, STL and DB blocks as text and only LAD, FBD and GRAPH as XML - the layout
+  a git repository wants. `tia block source <station> --all` is the same thing.
+- `--filter` and `--type` narrow it, as in `tia blocks`.
+- Know-how protected blocks are skipped and named; a block that will not export is reported and
+  the rest still go out, with exit 1 at the end. A missing licence stops it at the first block.
+- Files already in the directory are overwritten, never deleted.
+
+### Changed
+
+- **`tia tags` prints CSV, and refuses `--json`.** It was a table, or JSON with `--json`. The CSV
+  is the tag table file format: with `--table <name>` it is that table's file, which
+  `tia table import` takes back; without, it lists every table with a leading `Table` column.
+- **`--timeout` is in seconds everywhere.** `sim create --timeout` was milliseconds; it is seconds
+  now, default 60, like `open --timeout` (default 900).
+- **The help calls the first argument `<station>` throughout**, as the workspace's `station:`
+  does; it was `<device>` in most places and `<station>` in a few. Only the name changed.
+
+### Fixed
+
+**`session list` and `session status` show a project opened through tia.** The session's cached
+state only refreshed on some commands, so a project opened with `project open` or `project new`
+showed as none until something else happened.
+
 ## 0.4.0 — 2026-10-18
 
 ### Added

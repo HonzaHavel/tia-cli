@@ -66,9 +66,23 @@ namespace TiaCli.Openness
 
                 var result = Dispatch(request);
                 if (result is SessionStateDto state) _snapshot = state;
+                else if (request.Method.StartsWith("project.", StringComparison.Ordinal)) Refresh();
                 if (request.Method == "session.disconnect") _snapshot = null;
                 return result;
             }).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Brings the snapshot up to date after a request that opened, closed or changed the
+        /// project. Without it 'session list' kept naming no project for a session that had just
+        /// opened one - and a command run inside a workspace, which finds its session by the
+        /// project it has open, would not have found it at all.
+        /// </summary>
+        private void Refresh()
+        {
+            if (!_session.IsConnected) return;
+            try { _snapshot = _session.Status(); }
+            catch { /* the request succeeded; a stale snapshot is not worth failing it over */ }
         }
 
         private SessionStateDto Ensure()
@@ -150,6 +164,11 @@ namespace TiaCli.Openness
                 case "project.retrieve": return _session.RetrieveProject(
                     p.RequiredString("archive"), p.RequiredString("directory"), p.Bool("upgrade", false));
 
+                case "hardware.export": return _session.ExportHardware(
+                    p.RequiredString("path"), p.String("device"));
+                case "hardware.import": return _session.ImportHardware(
+                    p.RequiredString("path"), p.String("existing"));
+
                 case "device.list": return _session.ListDevices();
                 case "catalog.search": return _session.SearchCatalog(
                     p.RequiredString("filter"), p.Int("limit", 50));
@@ -179,6 +198,14 @@ namespace TiaCli.Openness
                 case "block.export": return _session.ExportBlock(
                     p.RequiredString("device"), p.RequiredString("block"), p.RequiredString("targetPath"),
                     p.Bool("inline", false), p.Int("maxInlineChars", 200000));
+                case "program.export": return _session.ExportProgram(
+                    p.RequiredString("device"), p.RequiredString("directory"));
+                case "program.sync": return _session.SyncProgram(
+                    p.RequiredString("device"), p.RequiredString("directory"),
+                    p.Strings("changed"), p.Strings("deleted"));
+                case "block.exportAll": return _session.ExportAllBlocks(
+                    p.RequiredString("device"), p.RequiredString("directory"), p.Bool("asSource", false),
+                    p.String("filter"), p.String("type"), p.Bool("underRoot", false));
                 case "block.exportSource": return _session.ExportBlockSource(
                     p.RequiredString("device"), p.RequiredString("block"), p.String("targetPath"),
                     p.Bool("withDependencies", false), p.Bool("inline", false),
@@ -196,6 +223,20 @@ namespace TiaCli.Openness
                     p.RequiredString("device"), p.RequiredString("folder"));
 
                 case "tag.listTables": return _session.ListTagTables(p.RequiredString("device"));
+                case "tag.exportTable": return _session.ExportTagTable(
+                    p.RequiredString("device"), p.RequiredString("table"), p.RequiredString("targetPath"));
+                case "tag.exportTables": return _session.ExportTagTables(
+                    p.RequiredString("device"), p.RequiredString("directory"), p.Bool("underRoot", false));
+                case "tag.importTable": return _session.ImportTagTable(
+                    p.RequiredString("device"), p.RequiredString("filePath"), p.String("name"), p.String("folder"));
+
+                case "type.list": return _session.ListTypes(p.RequiredString("device"));
+                case "type.export": return _session.ExportType(
+                    p.RequiredString("device"), p.RequiredString("type"), p.RequiredString("targetPath"));
+                case "type.exportAll": return _session.ExportTypes(
+                    p.RequiredString("device"), p.RequiredString("directory"), p.Bool("underRoot", false));
+                case "type.import": return _session.ImportType(
+                    p.RequiredString("device"), p.RequiredString("filePath"), p.String("folder"));
                 case "tag.list": return _session.ListTags(p.RequiredString("device"), p.String("table"));
                 case "tag.createTable": return _session.CreateTagTable(
                     p.RequiredString("device"), p.RequiredString("name"));

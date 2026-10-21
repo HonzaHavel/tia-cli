@@ -75,7 +75,8 @@ if (-not $ProjectDir) {
 # Checked here so a long -ProjectDir, or a long user name under %TEMP%, fails with the reason.
 # The deepest project folder of the run is the one 'project retrieve' unpacks.
 $RetrieveDir   = Join-Path $ProjectDir 'r'
-$projectFolder = Join-Path $RetrieveDir 'FieldTest'
+# The workspace case retrieves deeper still, into ws\project.
+$projectFolder = Join-Path $ProjectDir 'ws\project\FieldTest'
 if ($projectFolder.Length -gt 143) {
     throw "The test project would end up at $projectFolder ($($projectFolder.Length) characters), and TIA Portal allows at most 143. Pass a shorter -ProjectDir, such as C:\tia-test."
 }
@@ -408,7 +409,11 @@ END_FUNCTION_BLOCK
     Case -Name 'tag add without address' -Group core -TiaArgs @('tag', 'add', 'PLC_1', 'Spare', '--table', 'FieldTags', '--type', 'Int')
     Case -Name 'tables'     -Group core -TiaArgs @('tables', 'PLC_1')
     Case -Name 'tags'       -Group core -TiaArgs @('tags', 'PLC_1')
-    Case -Name 'tags --table --json' -Group core -TiaArgs @('tags', 'PLC_1', '--table', 'FieldTags', '--json')
+    Case -Name 'tags --table' -Group core -TiaArgs @('tags', 'PLC_1', '--table', 'FieldTags')
+    $tagCsv = Join-Path $ProjectDir 'FieldTags.csv'
+    Case -Name 'table export' -Group core -TiaArgs @('table', 'export', 'PLC_1', 'FieldTags', '--out', $tagCsv)
+    Case -Name 'table import' -Group core -TiaArgs @('table', 'import', 'PLC_1', $tagCsv)
+    Case -Name 'table export --all' -Group core -TiaArgs @('table', 'export', 'PLC_1', '--all', '--out', (Join-Path $ProjectDir 'all-tags'))
     $xml = Join-Path $ProjectDir 'Motor.xml'
 
     $function = @'
@@ -444,6 +449,25 @@ END_FUNCTION
     Case -Name 'block source to stdout' -Group core -TiaArgs @('block', 'source', 'PLC_1', 'Twice')
     Case -Name 'block export' -Group core -TiaArgs @('block', 'export', 'PLC_1', 'Motor', '--out', $xml)
     Case -Name 'block export --print' -Group core -TiaArgs @('block', 'export', 'PLC_1', 'Motor', '--print')
+    Case -Name 'block export --all' -Group core -TiaArgs @('block', 'export', 'PLC_1', '--all', '--out', (Join-Path $ProjectDir 'all-xml'))
+    Case -Name 'block export --all --source' -Group core -TiaArgs @('block', 'export', 'PLC_1', '--all', '--source', '--out', (Join-Path $ProjectDir 'all-src'))
+
+    $udt = @'
+TYPE "MotorData"
+VERSION : 0.1
+   STRUCT
+      speed : Int;
+      running : Bool;
+   END_STRUCT;
+
+END_TYPE
+'@
+    $udtFile = Join-Path $ProjectDir 'MotorData.udt'
+    Case -Name 'source add a data type' -Group core -TiaArgs @('source', 'add', 'PLC_1', 'MotorData.udt') -Stdin $udt
+    Case -Name 'types'       -Group core -TiaArgs @('types', 'PLC_1')
+    Case -Name 'type export' -Group core -TiaArgs @('type', 'export', 'PLC_1', 'MotorData', '--out', $udtFile)
+    Case -Name 'type import' -Group core -TiaArgs @('type', 'import', 'PLC_1', $udtFile)
+    Case -Name 'type export --all' -Group core -TiaArgs @('type', 'export', 'PLC_1', '--all', '--out', (Join-Path $ProjectDir 'all-types'))
 
     Case -Name 'block rename'      -Group core -TiaArgs @('block', 'rename', 'PLC_1', 'Motor', 'MotorRenamed')
     Case -Name 'block rename back' -Group core -TiaArgs @('block', 'rename', 'PLC_1', 'MotorRenamed', 'Motor')
@@ -466,6 +490,20 @@ END_FUNCTION
     Case -Name 'missing block exits 5' -Group core -TiaArgs @('block', 'show', 'PLC_1', 'NoSuchBlock') -Expect @(5)
 
     Case -Name 'project save' -Group core -TiaArgs @('project', 'save')
+
+    # CAx hardware export and import. Import only with retain here: it keeps PLC_1 as it is, so the
+    # downloads and archives below still work on the station they expect. tools/caxtest.sh is the
+    # full round trip into an empty project.
+    #
+    # CAx exports the PLC tag tables too, and skips a tag that has no address with an error. This
+    # project has one on purpose ('tag add without address'), so the export reports exactly that
+    # error and exits 1 - with the file written. Exit 0 here would mean CAx changed its behaviour.
+    $aml = Join-Path $ProjectDir 'FieldTest.aml'
+    $skipNote = 'CAx skips the tag Spare, which has no address; one error is expected.'
+    Case -Name 'hw export'          -Group core -TiaArgs @('hw', 'export', $aml) -Expect @(1) -Note $skipNote
+    Case -Name 'hw export --device' -Group core -TiaArgs @('hw', 'export', (Join-Path $ProjectDir 'PLC_1.aml'), '--device', 'PLC_1') -Expect @(1) -Note $skipNote
+    Case -Name 'hw import --existing retain' -Group core -TiaArgs @('hw', 'import', $aml, '--existing', 'retain')
+    Case -Name 'hw import refuses a bad option' -Group core -TiaArgs @('hw', 'import', $aml, '--existing', 'sideways') -Expect @(2)
 
     # The shell is a prompt, but it reads stdin like anything else, so two lines stand in for a person.
     Case -Name 'shell with piped stdin' -Group core -TiaArgs @('shell') -Stdin "devices`nblocks PLC_1`nexit"
@@ -653,6 +691,37 @@ END_FUNCTION
         }
     } else {
         Skip -Name 'second session beside the first' -Group core -Why "session status did not give the portal's process id"
+    }
+
+    # ------------------------------------------------------------ workspace
+    Head 'Workspace'
+
+    # A workspace made from the archive above. Inside it, commands must reach its project and no
+    # other: the session still holding FieldTest is somebody else's project as far as it knows.
+    # TIA_WORKSPACE stands in for running from inside the folder.
+    if ($zap) {
+        $wsDir = Join-Path $ProjectDir 'ws'
+        Case -Name 'init --from an archive' -Group core -TiaArgs @('init', $wsDir, '--from', $zap.FullName)
+
+        $env:TIA_WORKSPACE = $wsDir
+        try {
+            Case -Name 'workspace'                          -Group core -TiaArgs @('workspace')
+            Case -Name 'nothing open there: commands refuse' -Group core -TiaArgs @('devices') -Expect @(3)
+            Case -Name 'open retrieves the archive'         -Group core -TiaArgs @('open', '--headless')
+            if ($script:LastPassed) {
+                Case -Name 'commands go to the workspace project' -Group core -TiaArgs @('project', 'info')
+                Case -Name 'workspace shows it open'              -Group core -TiaArgs @('workspace')
+                Case -Name 'open again finds the session'         -Group core -TiaArgs @('open')
+                # Two sessions now, and without the workspace nothing says which.
+                Case -Name '--no-workspace ignores it' -Group core -TiaArgs @('project', 'info', '--no-workspace') -Expect @(6)
+                Case -Name 'session stop in the workspace' -Group core -TiaArgs @('session', 'stop')
+                Case -Name 'the other session survives' -Group core -TiaArgs @('session', 'list')
+            }
+        } finally {
+            Remove-Item Env:\TIA_WORKSPACE -ErrorAction SilentlyContinue
+        }
+    } else {
+        Skip -Name 'init --from an archive' -Group core -Why 'no archive was made earlier in the run'
     }
     } # end of the "session started" branch
 

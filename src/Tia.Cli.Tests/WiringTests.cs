@@ -32,7 +32,7 @@ namespace TiaCli.Tests
         }
 
         /// <summary>Verbs handled outside the Commands switch, so absent from it by design.</summary>
-        private static readonly string[] HandledElsewhere = { "session start", "session stop", "session status", "session list", "shell" };
+        private static readonly string[] HandledElsewhere = { "session start", "session stop", "session status", "session list", "shell", "init", "open", "workspace", "export", "sync" };
 
         /// <summary>Kept working for people who learned it before 'source add' existed.</summary>
         private static readonly string[] UndocumentedAliases = { "scl import" };
@@ -40,11 +40,11 @@ namespace TiaCli.Tests
         [Fact]
         public void EveryWireMethodTheCliSendsHasAHandler()
         {
-            var commands = Source("Cli", "Commands.cs");
+            var commands = Source("Cli", "Commands.cs") + Source("Cli", "ProgramCommands.cs");
             var host = Source("Openness", "SessionHost.cs");
 
             var sent = Regex.Matches(commands,
-                    "\"(portal|session|project|device|catalog|source|block|tag|ui|plc|sim)\\.[A-Za-z]+\"")
+                    "\"(portal|session|project|device|catalog|source|block|tag|type|ui|plc|sim|program)\\.[A-Za-z]+\"")
                 .Cast<Match>()
                 .Select(m => m.Value.Trim('"'))
                 .Distinct()

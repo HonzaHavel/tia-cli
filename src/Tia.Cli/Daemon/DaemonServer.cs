@@ -49,6 +49,7 @@ namespace TiaCli.Daemon
         private readonly string _pipeName;
         private readonly object _advertiseLock = new object();
         private int _advertisedPortal = -1;
+        private string _advertisedProject;
 
         public DaemonServer(ServeOptions options)
         {
@@ -123,7 +124,8 @@ namespace TiaCli.Daemon
 
                 var session = _host.Snapshot;
                 var portal = session != null && session.Connected ? session.ProcessId : 0;
-                if (portal == _advertisedPortal) return;
+                var project = session != null && session.Connected ? session.Project?.Path : null;
+                if (portal == _advertisedPortal && project == _advertisedProject) return;
 
                 DaemonState.Write(new DaemonState
                 {
@@ -131,8 +133,10 @@ namespace TiaCli.Daemon
                     ProcessId = _processId,
                     StartedAt = _startedAt.ToString("yyyy-MM-dd'T'HH:mm:ss"),
                     PortalProcessId = portal,
+                    ProjectPath = project,
                 });
                 _advertisedPortal = portal;
+                _advertisedProject = project;
             }
         }
 

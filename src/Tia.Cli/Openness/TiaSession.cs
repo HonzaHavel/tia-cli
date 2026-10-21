@@ -1368,7 +1368,10 @@ namespace TiaCli.Openness
                         TableName = table.Name,
                         DataType = tag.DataTypeName,
                         LogicalAddress = tag.LogicalAddress,
-                        Comment = FirstText(tag.Comment),
+                        Comment = EditingText(tag.Comment),
+                        HmiVisible = tag.ExternalVisible,
+                        HmiAccessible = tag.ExternalAccessible,
+                        HmiWriteable = tag.ExternalWritable,
                     });
                 }
             }

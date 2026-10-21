@@ -74,16 +74,30 @@ namespace TiaCli
             if (cmd.Verb == "session list") return Session.List(output);
             if (cmd.Verb == "session status") return Session.StatusCommand(cmd, output);
 
+            if (cmd.Verb == "init") return WorkspaceCommands.Init(cmd, output);
+            if (cmd.Verb == "open") return WorkspaceCommands.Open(cmd, output);
+            if (cmd.Verb == "workspace") return WorkspaceCommands.Show(cmd, output);
+
+            WorkspaceCommands.FillStation(cmd, Workspace.Find());
+
             using (var executor = CreateExecutor(cmd, output))
             {
                 if (cmd.Verb == "shell") return Shell.Run(executor, output);
+                if (cmd.Verb == "export") return ProgramCommands.Export(cmd, executor, output);
+                if (cmd.Verb == "sync") return ProgramCommands.Sync(cmd, executor, output);
                 return Commands.Execute(cmd, executor, output);
             }
         }
 
-        /// <summary>The portal a command names: --attach first, then TIA_PORTAL.</summary>
-        internal static int? TargetPortal(CommandLine cmd) =>
-            cmd.NullableInt("attach") ?? SessionRegistry.PortalFromEnvironment();
+        /// <summary>
+        /// The portal a command goes to. Inside a workspace, the one with the workspace's project
+        /// open - and an --attach or TIA_PORTAL naming another is refused. Outside one, --attach,
+        /// then TIA_PORTAL. Strict refuses when the workspace's project is open nowhere; lenient
+        /// returns null, for the session verbs that only look or tidy up.
+        /// </summary>
+        internal static int? TargetPortal(CommandLine cmd, bool strict = true) =>
+            WorkspaceCommands.PortalFor(cmd,
+                cmd.NullableInt("attach") ?? SessionRegistry.PortalFromEnvironment(), strict);
 
         /// <summary>
         /// Picks who does the work. A session holding the named portal wins - or, with none named,

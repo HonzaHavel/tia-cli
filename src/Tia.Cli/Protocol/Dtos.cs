@@ -61,6 +61,27 @@ namespace TiaCli.Protocol
         public int DeviceCount { get; set; }
     }
 
+    /// <summary>The outcome of a CAx hardware export or import.</summary>
+    public sealed class CaxResultDto
+    {
+        public string Operation { get; set; }
+        public string FilePath { get; set; }
+        public long Bytes { get; set; }
+        /// <summary>The one station exported; null when it was the whole project.</summary>
+        public string Device { get; set; }
+        public string State { get; set; }
+        public int ErrorCount { get; set; }
+        public int WarningCount { get; set; }
+        public List<CaxMessageDto> Messages { get; set; }
+    }
+
+    public sealed class CaxMessageDto
+    {
+        public string State { get; set; }
+        public string Message { get; set; }
+        public int Depth { get; set; }
+    }
+
     public sealed class ArchiveDto
     {
         public string Project { get; set; }
@@ -156,6 +177,19 @@ namespace TiaCli.Protocol
         public string DataType { get; set; }
         public string LogicalAddress { get; set; }
         public string Comment { get; set; }
+        public bool HmiVisible { get; set; }
+        public bool HmiAccessible { get; set; }
+        public bool HmiWriteable { get; set; }
+    }
+
+    /// <summary>A PLC data type (UDT) as it sits in the project tree.</summary>
+    public sealed class TypeDto
+    {
+        public string Name { get; set; }
+        public string Path { get; set; }
+        public bool IsConsistent { get; set; }
+        public bool IsKnowHowProtected { get; set; }
+        public string ModifiedDate { get; set; }
     }
 
     /// <summary>The outcome of a download, upload or simulation start.</summary>

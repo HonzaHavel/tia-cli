@@ -1,0 +1,143 @@
+# Roadmap
+
+What is planned, in order, with what has been decided so far. Not a promise of dates.
+
+## Address very soon: syncing must not break offline/online consistency
+
+Parked on purpose (2026-10-20), but it decides whether `tia sync` can be used on a project that
+is running on a PLC, so it comes right after the current work.
+
+A rebuilt project, or a block regenerated from source, can stop matching the PLC: new interface
+timestamps make instance DBs need reinitialising (actual values lost on download), and blocks
+that do not match cannot be watched online or snapshotted. VCI shows this today.
+
+- **Consistency probe, no PLC needed:** record an FB's and its instance DB's interface and code
+  timestamps, change only the FB body in its `.scl`, sync, read them again, and compare with a copy
+  taken before (`PlcSoftware.CompareTo`). Same for a DB where only a start value changed. If the
+  interface timestamp survives, syncing only what changed is safe.
+- **`tia compare`:** `PlcSoftware.CompareToOnline()` (offline vs PLC), `PlcSoftware.CompareTo` and
+  `Device.CompareTo` (project vs project, offline). Read-only.
+- `tia download` already refuses the `DataBlockReinitialization` prompt unless `--force`.
+- Actual values: Openness can only export a snapshot taken in TIA (`InterfaceSnapshot`), not take
+  one. The plan is to avoid mismatches rather than rescue values after them.
+- Principle: the downloaded project (`.tia/archive/`, `.tia/project/`) carries TIA's identities; `source/`
+  is its reviewable view. Changes are applied in place; rebuilding is for CI and recovery.
+
+## 1. Workspaces — in progress
+
+A folder that holds one TIA project in three forms, found by walking up from the current folder
+to `.tia/`, the way git finds `.git`:
+
+```
+Line3/
+  .tia/
+    config     committed: name, TIA version, default station
+    project/   not committed: the working project, never stored
+    archive/   not committed: Line3.zap20, uploaded to Azure Blob by a separate integration
+  source/      committed: the program as files
+```
+
+Inside a workspace, commands go to the session or portal that has *this* project open, matched
+by its project file - never to whatever portal happens to be running. `tia open` starts TIA
+Portal with `.tia/project`, or retrieves `.tia/archive` into it, and exits; commands attach per
+call, and only `--headless` needs a session.
+
+## 2. The program as files in `source/`
+
+One folder per station, mirroring TIA's tree:
+
+```
+source/PLC_1/
+  PLC data types/   *.udt
+  PLC tags/         *.csv, written and read by tia-cli through the tag API (TIA has no CSV)
+  Program blocks/   *.scl (SCL), *.awl (STL), *.db (DB), *.xml (LAD, FBD, GRAPH, everything else)
+```
+
+`tia export` writes it all in one call, `tia sync` brings back what git says changed and compiles
+- both built (2026-10-21), not yet run against a licensed TIA. Still open: user constants in the
+CSV, and whether a new `.udt` lands in its folder. Found while planning, and to use:
+
+- Every part of the three folders can be exported and imported natively: `PlcBlock.Export`,
+  `PlcType.Export` / `PlcTypeComposition.Import`, `PlcTagTable.Export` /
+  `PlcTagTableComposition.Import`.
+- `PlcBlock.Export` takes `DocumentInfoOptions`; leaving out `CreatedTimeStamp` makes exports
+  stable without the text fix in `TiaSession.Blocks.cs` (`WithoutCreatedStamp`).
+- `PlcBlock.ExportAsDocuments` / `PlcBlockComposition.ImportFromDocuments` (and the same for
+  types): V19+'s document format, which also covers LAD/FBD. Check how readable it is before
+  choosing XML for those.
+
+## 3. Hardware as YAML — a main feature, not just for rebuilding
+
+Hardware changes after commissioning too, and the hardware description is what another project
+would be generated from. So hardware is described in one short, human-edited YAML per project,
+`source/hardware.yaml`, with three directions:
+
+- **export:** project → YAML.
+- **apply:** YAML → an *existing* project, changing only what differs (add, remove or move a module,
+  change an IP), so unchanged hardware keeps its identity - the same rule as `tia sync`.
+- **create:** YAML → an empty project.
+
+Decided (2026-10-20):
+
+- **Short YAML: anything not written is the default.** Defaults depend on order number, firmware
+  and TIA version. They are learned by plugging a fresh module of that type into a scratch project,
+  and stored per TIA version, so the version in the workspace's `.tia/config` picks the right set.
+- **Always written, even when default:** names, order number, firmware, rack and slot, I/O start
+  addresses, IP / mask / subnet / router, PROFINET device name - TIA assigns these by plug order or
+  name, so omitting them would give different values on a rebuild.
+- **IDs:** none in the YAML. Links (node → subnet) are written by name; when AML is generated, IDs
+  are derived from each element's path, so the same hardware always gives the same IDs.
+- **Generator on top:** a template YAML holds a machine's general structure; a generator fills in
+  the rest - IP addresses included, since the networks are local and closed - to produce a
+  project's `hardware.yaml`.
+- To prove the YAML is enough: export a real project to YAML, build an empty project from it, and
+  compare the hardware with the original (`Device.CompareTo`, plus CAx export of both).
+
+How YAML gets into a project - Openness calls (add device, plug modules, set attributes, connect
+subnets) or generated AML through `hw import` - is open; Openness calls give per-item errors and
+the same defaults as plugging by hand.
+
+### CAx findings so far
+
+`tia hw export` / `tia hw import` exist. `tools/caxtest.sh` finds out on a real project what a
+round trip keeps. Known so far (V20, work machine, 2026-10-19):
+
+- Every export changes its file name, a timestamp and every element ID. With those normalized, two
+  exports are identical, and TIA imports the normalized file.
+- A single S7-1200 station (CPU, onboard I/O, PROFINET address and subnet) survives export → import
+  into an empty project → export unchanged, every CPU attribute included. The project name is
+  written into the file, so a rebuild has to use the same name.
+- **CAx carries the PLC tag tables too**, and skips a tag without an address with an error.
+
+Decided (2026-10-20):
+
+- **One project, one hardware file**, the whole project's hardware, so the subnets between
+  stations stay in one place. (Now `hardware.yaml`, above; AML is generated, not committed.)
+- **The tag tables are the one source of truth for tags.** The hardware file carries no tags;
+  a build creates the hardware first, then imports the tag CSVs.
+  Hardware owns modules, address ranges and the network; tags own names, types and addresses.
+  To check first: whether I/O channels link to tags by ID, so that a stripped file still imports
+  and keeps its channels - a probe step on a project that has I/O tags.
+- The protection password (confidential configuration data) is not checked yet: the probe project
+  never had one. A rebuild of a protected CPU will at least need `device protection` again.
+
+Still to run: the probe on a real project with distributed I/O, and a protected CPU. If it holds,
+`hw export` should write normalized AML so git only shows real changes.
+
+## 4. Build a project from `source/`
+
+`tia open` with nothing in `.tia/project/` or `.tia/archive/`: create the project, create the hardware from
+`source/hardware.yaml`, then data types, tags and blocks, and compile. For CI and recovery - a
+rebuilt project should not be downloaded to a running machine without someone deciding to.
+
+## Later: `Siemens.Engineering.VersionControl` — do not forget
+
+Openness V20 has VCI's own API: `VersionControlInterface` (a project service), `Workspace` with a
+root folder, `WorkspaceMapping` linking a project object (Program blocks, PLC data types, PLC
+tags) to a folder, `MappedObject.Synchronize(ProjectToWorkspace | WorkspaceToProject)`, and a
+per-object compare state (`Equal`, `Unequal`, `WorkspaceFileMissing`).
+
+It is very likely what writes the layout the existing TIA repositories already have. If so, it
+could replace most of step 2 and make those repositories work with tia unchanged. Probe it on the
+work machine once workspaces exist: map a copy of a real project, sync out, compare with an
+existing repository, edit, sync back, compile.

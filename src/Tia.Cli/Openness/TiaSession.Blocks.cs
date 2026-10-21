@@ -119,12 +119,118 @@ namespace TiaCli.Openness
                 throw new SessionException(WireErrorCodes.AccessDenied,
                     $"Block '{block.Name}' is know-how protected and cannot be exported.");
 
+            var file = WriteXml(block, targetPath);
+            return Read(block.Name, file, inline, maxInlineChars);
+        }
+
+        private static FileInfo WriteXml(PlcBlock block, string targetPath)
+        {
             var file = Fresh(targetPath);
             block.Export(file, ExportOptions.None);
             DropCreatedStamp(file);
             file.Refresh();
+            return file;
+        }
 
-            return Read(block.Name, file, inline, maxInlineChars);
+        /// <summary>
+        /// Every block of the station, one file each, in a copy of the program folders under
+        /// <paramref name="directory"/>. It all happens in this one call so a program of hundreds of
+        /// blocks is one round trip, not hundreds. A block that will not export is reported and the
+        /// rest carry on; only a failure that would sink every block - no licence, a dead portal -
+        /// stops it. With <paramref name="asSource"/> the textual blocks come out as SCL, STL or DB
+        /// text and only the drawn ones as XML: the layout a repository wants. With
+        /// <paramref name="underRoot"/> the files go one folder further down, in one named like the
+        /// project tree's own root - "Program blocks" - so a station's folder mirrors TIA's tree.
+        /// </summary>
+        public BlockExportAllDto ExportAllBlocks(string deviceName, string directory, bool asSource,
+            string nameFilter, string typeFilter, bool underRoot = false)
+        {
+            var software = RequirePlcSoftware(deviceName);
+            var root = software.BlockGroup.Name;
+            if (underRoot) directory = Path.Combine(directory, SafeFileName(root));
+            var result = new BlockExportAllDto
+            {
+                Directory = Path.GetFullPath(directory),
+                Exported = new List<ExportResultDto>(),
+                Skipped = new List<BlockProblemDto>(),
+                Failed = new List<BlockProblemDto>(),
+            };
+
+            WriteBlocks(software, result.Directory, asSource, nameFilter, typeFilter, "", result);
+            return result;
+        }
+
+        /// <summary>
+        /// The loop behind <see cref="ExportAllBlocks"/>: every block into <paramref name="directory"/>,
+        /// reported into <paramref name="result"/> under its folder path with <paramref name="label"/>
+        /// in front.
+        /// </summary>
+        private static void WriteBlocks(PlcSoftware software, string directory, bool asSource,
+            string nameFilter, string typeFilter, string label, BlockExportAllDto result)
+        {
+            var root = software.BlockGroup.Name;
+            foreach (var handle in Handles(software, includeSystemGroups: false))
+            {
+                var block = handle.Block;
+                if (!Matches(Describe(block, handle.Folder), nameFilter, typeFilter)) continue;
+
+                var reference = label + Normalize(handle.Folder + "/" + block.Name, root);
+                if (block.IsKnowHowProtected)
+                {
+                    result.Skipped.Add(new BlockProblemDto { Block = reference, Reason = "know-how protected" });
+                    continue;
+                }
+
+                var text = asSource && HasTextForm(block);
+                var target = Path.Combine(directory,
+                    BulkExportPath(handle.Folder, root, block.Name, text ? SourceExtension(block) : ".xml"));
+                try
+                {
+                    var file = text ? WriteSource(software, block, target) : WriteXml(block, target);
+                    result.Exported.Add(new ExportResultDto
+                    {
+                        Name = reference,
+                        FilePath = file.FullName,
+                        Bytes = file.Length,
+                    });
+                }
+                catch (Exception error) when (!AlreadyExplained(error))
+                {
+                    result.Failed.Add(new BlockProblemDto { Block = reference, Reason = error.Message });
+                }
+            }
+        }
+
+        private static bool HasTextForm(PlcBlock block)
+        {
+            switch (block.ProgrammingLanguage)
+            {
+                case ProgrammingLanguage.DB:
+                case ProgrammingLanguage.F_DB:
+                case ProgrammingLanguage.SCL:
+                case ProgrammingLanguage.STL:
+                case ProgrammingLanguage.F_STL:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Where one block lands under the export directory: its folders below the root, then its
+        /// name. Characters Windows will not have in a file name become '_', so a block named
+        /// "Pump 1/2" is still written out rather than failing the export.
+        /// </summary>
+        internal static string BulkExportPath(string folder, string root, string name, string extension)
+        {
+            var segments = Segments(folder, root).Concat(new[] { name }).Select(SafeFileName);
+            return Path.Combine(segments.ToArray()) + extension;
+        }
+
+        private static string SafeFileName(string name)
+        {
+            var invalid = Path.GetInvalidFileNameChars();
+            return new string(name.Select(c => invalid.Contains(c) ? '_' : c).ToArray());
         }
 
         private static readonly Regex CreatedStamp =
@@ -168,10 +274,16 @@ namespace TiaCli.Openness
                 throw new SessionException(WireErrorCodes.AccessDenied,
                     $"Block '{block.Name}' is know-how protected and cannot be exported.");
 
-            var file = Fresh(string.IsNullOrEmpty(targetPath)
+            var file = WriteSource(software, block, string.IsNullOrEmpty(targetPath)
                 ? Path.Combine(Path.GetTempPath(), "tia-cli-src", block.Name + SourceExtension(block))
-                : targetPath);
+                : targetPath, withDependencies);
+            return Read(block.Name, file, inline, maxInlineChars);
+        }
 
+        private static FileInfo WriteSource(PlcSoftware software, PlcBlock block, string targetPath,
+            bool withDependencies = false)
+        {
+            var file = Fresh(targetPath);
             try
             {
                 software.ExternalSourceGroup.GenerateSource(new[] { (IGenerateSource)block }, file,
@@ -190,7 +302,7 @@ namespace TiaCli.Openness
                 throw new SessionException(WireErrorCodes.OpennessError,
                     $"TIA Portal reported no error but wrote no source for '{block.Name}'.");
 
-            return Read(block.Name, file, inline, maxInlineChars);
+            return file;
         }
 
         /// <summary>
@@ -418,10 +530,11 @@ namespace TiaCli.Openness
 
             if (blocks != null)
             {
+                // A .udt source makes data types, which count as much as blocks do.
                 foreach (var generated in blocks)
                 {
-                    var block = generated as PlcBlock;
-                    if (block != null) result.GeneratedBlocks.Add(block.Name);
+                    if (generated is PlcBlock block) result.GeneratedBlocks.Add(block.Name);
+                    else if (generated is Siemens.Engineering.SW.Types.PlcType type) result.GeneratedBlocks.Add(type.Name);
                 }
             }
 

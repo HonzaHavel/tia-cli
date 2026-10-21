@@ -83,6 +83,37 @@ namespace TiaCli.Protocol
         public List<BlockDto> Blocks { get; set; }
     }
 
+    /// <summary>What exporting every block of a station wrote, passed over and could not write.</summary>
+    public sealed class BlockExportAllDto
+    {
+        public string Directory { get; set; }
+        /// <summary>One per file written; the name is the block's folder path.</summary>
+        public List<ExportResultDto> Exported { get; set; }
+        public List<BlockProblemDto> Skipped { get; set; }
+        public List<BlockProblemDto> Failed { get; set; }
+    }
+
+    /// <summary>What 'tia sync' did with the files it was given.</summary>
+    public sealed class ProgramSyncDto
+    {
+        public string Directory { get; set; }
+        /// <summary>"imported", "deleted" - what happened, then the file's path under the station.</summary>
+        public List<SyncedFileDto> Applied { get; set; }
+        public List<BlockProblemDto> Failed { get; set; }
+    }
+
+    public sealed class SyncedFileDto
+    {
+        public string File { get; set; }
+        public string Action { get; set; }
+    }
+
+    public sealed class BlockProblemDto
+    {
+        public string Block { get; set; }
+        public string Reason { get; set; }
+    }
+
     /// <summary>An external source as it sits in the project tree.</summary>
     public sealed class SourceDto
     {

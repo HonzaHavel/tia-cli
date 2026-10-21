@@ -50,9 +50,54 @@ In order:
 
 1. the portal named by `--attach <pid>` or `TIA_PORTAL=<pid>` — through the session holding it, or
    attached for this one command when no session does;
-2. the session started by `tia session start`, if exactly one is running;
-3. the single TIA Portal already running on this machine;
-4. nothing — the command stops and says so, unless `--start` was given.
+2. inside a workspace, the session or portal that has the workspace's project open — or nothing,
+   rather than another project (see below);
+3. the session started by `tia session start`, if exactly one is running;
+4. the single TIA Portal already running on this machine;
+5. nothing — the command stops and says so, unless `--start` was given.
+
+### Workspaces
+
+A workspace is a folder that holds one TIA project, marked by a `.tia` folder at its root. `tia`
+finds it by walking up from the current folder, the way git finds `.git`:
+
+```
+Line3/
+  .tia/
+    config     committed: the project's name, TIA version and default station
+    .gitignore keeps the rest of .tia/ out of git
+    project/   the working project
+    archive/   Line3.zap20, for blob storage
+  source/      committed: the program as files
+```
+
+```bash
+tia init --from C:\projects\Line3.zap20 --station PLC_1   # make one here, with a copy of an archive or project
+tia open                                  # start TIA Portal with the project, then exit
+tia workspace                             # where everything is, and who has it open
+tia blocks                                # from anywhere inside: this project, station PLC_1
+tia export                                # the program into source/PLC_1/
+tia sync                                  # what git says changed, back into TIA, then compile
+```
+
+`source/PLC_1/` mirrors TIA's tree: `Program blocks/` (SCL, STL and DB blocks as text, LAD, FBD
+and GRAPH as XML), `PLC data types/` (one `.udt` each) and `PLC tags/` (one `.csv` per tag table,
+with the columns of TIA's own Excel export). [GIT-WORKFLOW.md](GIT-WORKFLOW.md) is the whole loop.
+
+No session is needed. `tia open` starts TIA Portal the way a double-click does, so it belongs to you
+and closing it is closing the window; every later command finds it by its project and attaches for
+as long as it runs - about a tenth of a second more than going through a session. It opens
+`.tia/project`, or retrieves `.tia/archive` into it when there is no project yet. `tia open
+--headless` keeps a session instead, since a headless TIA Portal closes with whatever started it,
+and a session already running with no project open - `tia session start --headless`, say - is
+used rather than starting another.
+
+Inside a workspace a command goes to whichever session or portal has *its* project open, matched
+by the project file's path, so a restarted TIA Portal is found again and a second project open in
+another portal is never touched. When nothing has it open, commands stop with exit 3 instead of
+changing some other project, and an `--attach <pid>` or `TIA_PORTAL` naming a portal that does not
+have it is refused too. `--no-workspace` ignores the workspace for one command. With `station:` in
+`.tia/config`, commands that take a `<station>` may leave it out.
 
 `tia` refuses to guess rather than pick one: two portals and no session, or two sessions and no
 portal named, both stop with exit 6 and list what is there.
@@ -258,6 +303,11 @@ Run `tia help` for the full text.
 
 | | |
 | --- | --- |
+| `tia init [<folder>]` | Make a workspace: `.tia/` (`config`, `project/`, `archive/`) and `source/`. `--name <project>`, `--station <station>`, `--from <.apNN \| .zapNN>` copies one in |
+| `tia open` | Start TIA Portal with the workspace's project and exit. `--headless` keeps a session instead; `--upgrade`, `--timeout <seconds>` |
+| `tia workspace` | Where the workspace's files are and who has its project open |
+| `tia export [<station>]` | The station's program into `source/<station>/`: `Program blocks/`, `PLC data types/` (`.udt`), `PLC tags/` (`.csv`) |
+| `tia sync [<station>]` | What git says changed under `source/<station>/` back into the project, then compile. `--file <path>`, `--no-compile` |
 | `tia portals` | TIA Portal instances running on this machine |
 | `tia session start` | Start a background session and keep it. `--new`, `--headless`, `--attach <pid>`, `--project <path>`, `--idle <minutes>` |
 | `tia session list` | Every running session and the TIA Portal it holds |
@@ -270,42 +320,73 @@ Run `tia help` for the full text.
 | `tia project archive [<path>]` | Pack the project into one `.zapNN` file. No path: beside the project folder. `--save` first if there are unsaved changes, `--minimize` leaves out what TIA can rebuild, `--overwrite` replaces an existing archive |
 | `tia project retrieve <archive> <dir>` | Unpack an archive into `<dir>` and open it (`--upgrade`) |
 | `tia devices` | Stations, their CPUs and addresses |
-| `tia catalog <filter>` | Search the hardware catalog for order numbers |
-| `tia device add <type> <name>` | Add a station from a type identifier |
-| `tia device ip <device>` | `--address <ip> --mask <netmask>`, `--subnet <name>` for the TIA subnet, gateway with `--router <ip>` / `--no-router` |
-| `tia device attrs <device>` | List the Openness attributes of the CPU (`--filter <text>`) |
-| `tia device set <device> <attribute> <value>` | Change one of them |
-| `tia device protection <device>` | Access level and passwords (`--level`, `--password`, `--secret`). A current CPU will not compile until the last two are set |
-| `tia blocks <device>` | List blocks (`--filter`, `--type OB,FB,FC,DB`, `--tree`, `--system`) |
-| `tia block show <device> <block>` | Header, interface and network titles |
-| `tia block source <device> <block>` | The block as SCL/STL/DB text (`--out <path>`, `--deps`) |
-| `tia block export <device> <block>` | Openness XML (`--out <path>`, `--print`) |
-| `tia block import <device> <file>` | Blocks from Openness XML (`--folder <path>`, `--overwrite`) |
-| `tia block rename <device> <block> <new>` | Rename a block |
-| `tia block delete <device> <block>` | Delete a block (`--force` skips the question) |
-| `tia folder add` / `tia folder delete <device> <path>` | Folders in the block tree |
-| `tia sources <device>` | List external sources |
-| `tia source add <device> <name>` | SCL from `--file`, `--code`, or stdin (`--no-generate`, `--folder`) |
-| `tia source generate <device> <name>` | Compile a source already in the project (`--folder`) |
-| `tia source delete <device> <name>` | Delete a source; blocks it made stay |
-| `tia tables <device>` / `tia tags <device>` | Tag tables and tags (`--table`) |
-| `tia table add` / `tia tag add` | Create them (`--type`, `--address`) |
-| `tia compile <device>` | Compile. Exits non-zero when it reports errors. |
-| `tia download <device>` | Download to the PLC (`--address`, `--via`, `--interface`, `--target`, `--slot`, `--hardware`, `--changes`, `--stopped`, `--force`, `--secret`, `--plc-password`) |
-| `tia upload <ip>` | Upload the station at that address into the project as a new station |
-| `tia sim create <device>` | **In development.** Creates a PLCSIM instance and powers it on (`--cpu`, `--address`, `--mask`, `--timeout`). S7-1500 and up only, and TIA will not download to the instance it makes — see below |
-| `tia sim start <device>` | **In development, and does not currently work as expected.** Meant to be the download to S7-PLCSIM (`--advanced` for PLCSIM Advanced). Start the simulation from TIA and use `tia download <device> --interface PLCSIM` instead |
+| `tia catalog <filter>` | Search the hardware catalog for order numbers (`--limit <n>`, default 50) |
+| `tia device add <type> <name>` | Add a station from a type identifier (`--device-name <n>` for the device item) |
+| `tia hw export <file>` | Export the hardware configuration as CAx data (AutomationML). `--device <station>` for one station |
+| `tia hw import <file>` | Import CAx data. `--existing retain\|overwrite\|park` decides what happens to a device already there (default retain) |
+| `tia device ip <station>` | `--address <ip> --mask <netmask>`, `--subnet <name>` for the TIA subnet, gateway with `--router <ip>` / `--no-router` |
+| `tia device attrs <station>` | List the Openness attributes of the CPU (`--filter <text>`) |
+| `tia device set <station> <attribute> <value>` | Change one of them |
+| `tia device protection <station>` | Access level and passwords (`--level`, `--password`, `--secret`). A current CPU will not compile until the last two are set |
+| `tia blocks <station>` | List blocks (`--filter`, `--type OB,FB,FC,DB`, `--tree`, `--system`) |
+| `tia block show <station> <block>` | Header, interface and network titles |
+| `tia block source <station> <block>` | The block as SCL/STL/DB text (`--out <path>`, `--deps`). `--all` is `block export --all --source` |
+| `tia block export <station> <block>` | Openness XML (`--out <path>`, `--print`) |
+| `tia block export <station> --all` | Every block into the program's folders (`--out <dir>`, `--source` for text where there is one, `--filter`, `--type`). Default `<station>/Program blocks/`, under `source/` in a workspace |
+| `tia block import <station> <file>` | Blocks from Openness XML (`--folder <path>`, `--overwrite`) |
+| `tia block rename <station> <block> <new>` | Rename a block |
+| `tia block delete <station> <block>` | Delete a block (`--force` skips the question) |
+| `tia folder add` / `tia folder delete <station> <path>` | Folders in the block tree |
+| `tia sources <station>` | List external sources |
+| `tia source add <station> <name>` | SCL from `--file`, `--code`, or stdin (`--no-generate`, `--folder`) |
+| `tia source generate <station> <name>` | Compile a source already in the project (`--folder`) |
+| `tia source delete <station> <name>` | Delete a source; blocks it made stay |
+| `tia tables <station>` | Tag tables |
+| `tia tags <station>` | Tags as CSV, never JSON. `--table <t>` prints that table's own file |
+| `tia table add <station> <name>` | Create a tag table |
+| `tia tag add <station> <name>` | Create a tag (`--table <t>`, default the default table; `--type <dt>`, `--address <addr>`) |
+| `tia table export <station> <table>` | One tag table as CSV (`--out <file>`); `--all` for every table (`--out <dir>`, default `<station>/PLC tags/`) |
+| `tia table import <station> <file.csv>` | The table holds exactly the file's tags afterwards (`--name`, `--folder`) |
+| `tia types <station>` | PLC data types (UDTs) |
+| `tia type export <station> <type>` | One data type as `.udt` (`--out <file>`); `--all` for every type (`--out <dir>`, default `<station>/PLC data types/`) |
+| `tia type import <station> <file.udt>` | Generate the data type(s) in a `.udt` file (`--folder`) |
+| `tia compile <station>` | Compile. Exits non-zero when it reports errors. |
+| `tia download <station>` | Download to the PLC (`--address`, `--via`, `--interface`, `--target`, `--slot`, `--hardware`, `--changes`, `--stopped`, `--force`, `--secret`, `--plc-password`) |
+| `tia upload <ip>` | Upload the station at that address into the project as a new station (`--via`, `--interface`, `--slot`) |
+| `tia sim create <station>` | **In development.** Creates a PLCSIM instance and powers it on (`--cpu`, `--address`, `--mask`, `--timeout <seconds>`). S7-1500 and up only, and TIA will not download to the instance it makes — see below |
+| `tia sim start <station>` | **In development, and does not currently work as expected.** Meant to be the download to S7-PLCSIM (`--advanced` for PLCSIM Advanced; `--address`, `--interface`, `--slot`, `--hardware`, `--stopped`, `--target`, `--secret`, `--plc-password` as for `download`). Start the simulation from TIA and use `tia download <station> --interface PLCSIM` instead |
 | `tia show hw` | Open the hardware editor (`--view device\|network\|topology`) |
-| `tia show device <device>` | Open one station in it (`--view ...`) |
-| `tia show block <device> <block>` | Open a block's editor |
-| `tia show table <device> <table>` | Open a tag table |
+| `tia show device <station>` | Open one station in it (`--view ...`) |
+| `tia show block <station> <block>` | Open a block's editor |
+| `tia show table <station> <table>` | Open a tag table |
 
-Global: `--json`, `--attach <pid>`, `--start`, `--headless`, `--new`, `--no-daemon`,
-`--openness-version <v>`, `--quiet`, `--version`, `-h` / `--help`.
+Global: `--json` (not for `tags`, which is CSV), `--attach <pid>` (or `TIA_PORTAL=<pid>`),
+`--no-workspace`, `--start`, `--headless`, `--new`, `--no-daemon`, `--openness-version <v>`,
+`--quiet`, `--version`, `-h` / `--help`. `--timeout` is in seconds wherever it appears.
+
+### Several ways to the same thing
+
+Some jobs have more than one command, the way git has `checkout -b` beside `branch` and `checkout`.
+The longer road does a part on its own; the shorter one does the whole job.
+
+| Job | Commands |
+| --- | --- |
+| The whole program out | `tia export` = `block export --all --source` + `table export --all` + `type export --all`. Only `export` also deletes the files of what is gone from the project |
+| Every block as text | `block source --all` = `block export --all --source` |
+| Text into the project | `source add` (keeps the external source) · `sync --file` (removes it) · `type import` (`.udt`) |
+| An XML block in | `block import` · `sync --file <file.xml>` |
+| A tag table in | `table import` · `sync --file <file.csv>` |
+| One tag table out | `tags --table <t> > t.csv` = `table export <t>` |
+| One tag | `tag add` · a row in the table's CSV, then `table import` or `sync` |
+| Delete a block | `block delete` · delete its file, then `sync` |
+| Open a project | `project open` · `open` in a workspace · `session start --project` · `project retrieve` from an archive |
+| Pick a portal | `--attach` · `TIA_PORTAL` · the workspace |
+
+`scl import` is an old name for `source add`, kept working and left out of the help.
 
 ### Scripting
 
-`--json` prints the raw result of any command, and exit codes are specific:
+`--json` prints the raw result of any command but `tags`, and exit codes are specific:
 
 ```
 0 ok   1 failed   2 bad arguments   3 no session   4 no project   5 not found
@@ -374,7 +455,7 @@ tia compile PLC_1 || echo "compile failed"
   boots the simulator. From V18 that mode is gone: a simulated PLC is an ordinary PN/IE target behind
   the *Siemens PLCSIM Virtual Ethernet Adapter*, at its own IP address, so `sim start` uses that adapter
   instead — and the PLCSIM instance must already be running at the device's IP, because TIA will not
-  start one for a download. PLCSIM Advanced instances take `--advanced` for the software-target prompt. `tia sim create` is meant to remove that manual step and is **still in development**: PLCSIM exposes a Runtime API that builds instances, but only *Advanced* ones, which this TIA refuses as a download target and which need the PLCSIM Advanced licence. What works today is starting the simulation in TIA and running `tia download <device> --interface PLCSIM`.
+  start one for a download. PLCSIM Advanced instances take `--advanced` for the software-target prompt. `tia sim create` is meant to remove that manual step and is **still in development**: PLCSIM exposes a Runtime API that builds instances, but only *Advanced* ones, which this TIA refuses as a download target and which need the PLCSIM Advanced licence. What works today is starting the simulation in TIA and running `tia download <station> --interface PLCSIM`.
 - **Never throw from inside a download callback.** TIA treats an exception in its own callback as
   fatal: it surfaces as a `NonRecoverableException`, the portal is gone, and whatever the exception
   said is lost. Prompts `tia` will not answer are declined inside the callback and reported by name

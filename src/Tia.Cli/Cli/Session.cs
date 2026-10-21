@@ -14,7 +14,7 @@ namespace TiaCli.Cli
     /// </summary>
     internal static class Session
     {
-        public static int Start(CommandLine cmd, Output output)
+        public static int Start(CommandLine cmd, Output output, Action<IExecutor> afterStart = null)
         {
             // A session that was told to stop deletes its state file at once, so one on its way out is
             // never found here and never joined - 'session stop; session start' on one line once
@@ -77,9 +77,10 @@ namespace TiaCli.Cli
             if (!string.IsNullOrEmpty(project))
             {
                 output.Detail("Opening " + project + " - this takes minutes, not seconds.");
-                Commands.Call(executor, "project.open", new { path = Path.GetFullPath(project) });
+                Commands.Call(executor, "project.open", new { path = Path.GetFullPath(project), upgrade = cmd.Has("upgrade") });
             }
 
+            afterStart?.Invoke(executor);
             return Status(cmd, executor, output);
         }
 
@@ -98,7 +99,7 @@ namespace TiaCli.Cli
             }
             else
             {
-                var portal = Program.TargetPortal(cmd);
+                var portal = Program.TargetPortal(cmd, strict: false);
                 var target = SessionRegistry.Resolve(running, portal);
                 if (target == null && portal.HasValue)
                     throw new WireException(WireErrorCodes.NotFound,
@@ -200,7 +201,7 @@ namespace TiaCli.Cli
         public static int StatusCommand(CommandLine cmd, Output output)
         {
             var running = SessionRegistry.Running();
-            var portal = Program.TargetPortal(cmd);
+            var portal = Program.TargetPortal(cmd, strict: false);
 
             if (!cmd.Has("no-daemon"))
             {

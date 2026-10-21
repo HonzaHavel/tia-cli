@@ -27,6 +27,12 @@ namespace TiaCli.Daemon
         /// </summary>
         [JsonPropertyName("portalProcessId")] public int PortalProcessId { get; set; }
 
+        /// <summary>
+        /// The project file the session has open, null when none. A command run inside a workspace
+        /// finds its session by this, so a TIA Portal restarted under a new pid is still found.
+        /// </summary>
+        [JsonPropertyName("projectPath")] public string ProjectPath { get; set; }
+
         public static void Write(DaemonState state)
         {
             File.WriteAllText(DaemonPaths.StateFileFor(state.ProcessId),

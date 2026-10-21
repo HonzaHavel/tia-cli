@@ -158,6 +158,26 @@ namespace TiaCli.Tests
         }
     }
 
+    public class BulkExportPathTests
+    {
+        [Theory]
+        [InlineData("Program blocks", "Motor", ".xml", "Motor.xml")]
+        [InlineData("Program blocks/Pumps", "Motor", ".scl", @"Pumps\Motor.scl")]
+        [InlineData("Program blocks/Pumps/Line 2", "Motor", ".db", @"Pumps\Line 2\Motor.db")]
+        public void TheFileSitsInTheBlocksFoldersBelowTheRoot(string folder, string name, string extension,
+            string expected)
+        {
+            Assert.Equal(expected, TiaSession.BulkExportPath(folder, "Program blocks", name, extension));
+        }
+
+        [Fact]
+        public void CharactersAFileNameCannotHoldAreReplaced()
+        {
+            Assert.Equal("Pump 1_2_.xml",
+                TiaSession.BulkExportPath("Program blocks", "Program blocks", "Pump 1/2?", ".xml"));
+        }
+    }
+
     public class SourceNameTests
     {
         [Theory]
