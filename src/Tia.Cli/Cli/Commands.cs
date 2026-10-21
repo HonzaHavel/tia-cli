@@ -57,10 +57,17 @@ namespace TiaCli.Cli
                 case "table add": return TableAdd(cmd, executor, output);
                 case "table export": return ProgramCommands.TableExport(cmd, executor, output);
                 case "table import": return ProgramCommands.TableImport(cmd, executor, output);
+                case "tables export": return ProgramCommands.TablesExport(cmd, executor, output);
+                case "tables import": return ProgramCommands.ImportFolder(cmd, executor, output, "tables");
 
                 case "types": return ProgramCommands.Types(cmd, executor, output);
                 case "type export": return ProgramCommands.TypeExport(cmd, executor, output);
                 case "type import": return ProgramCommands.TypeImport(cmd, executor, output);
+                case "types export": return ProgramCommands.TypesExport(cmd, executor, output);
+                case "types import": return ProgramCommands.ImportFolder(cmd, executor, output, "types");
+
+                case "blocks export": return BlockExportAll(cmd, executor, output, asSource: cmd.Has("source"));
+                case "blocks import": return ProgramCommands.ImportFolder(cmd, executor, output, "blocks");
                 case "tag add": return TagAdd(cmd, executor, output);
 
                 case "show hw": return Show(cmd, executor, output, "ui.showHardware", new
@@ -752,7 +759,8 @@ namespace TiaCli.Cli
             var device = cmd.Positional(0, "station");
             if (cmd.PositionalOrNull(1) != null)
                 throw new WireException(WireErrorCodes.InvalidRequest,
-                    "--all exports every block; give a device and no block name.");
+                    "'blocks export' takes every block; give a station and no block name.",
+                    "For one, drop the plural: 'block export <station> <block>'.");
 
             var directory = ProgramCommands.AllDirectory(cmd, device, out var underRoot);
             var result = Call(executor, "block.exportAll", new

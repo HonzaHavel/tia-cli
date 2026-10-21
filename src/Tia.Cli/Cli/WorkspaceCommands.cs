@@ -47,6 +47,8 @@ namespace TiaCli.Cli
             { "source generate", 2 }, { "source delete", 2 }, { "scl import", 2 }, { "table add", 2 },
             { "tag add", 2 }, { "show block", 2 }, { "show table", 2 },
             { "table export", 2 }, { "table import", 2 }, { "types", 1 }, { "type export", 2 }, { "type import", 2 },
+            { "blocks export", 1 }, { "blocks import", 1 }, { "types export", 1 }, { "types import", 1 },
+            { "tables export", 1 }, { "tables import", 1 },
             { "block rename", 3 }, { "device set", 3 },
         };
 

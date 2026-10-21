@@ -171,6 +171,25 @@ namespace TiaCli.Tests
         }
     }
 
+    public class CollectionVerbTests
+    {
+        [Theory]
+        [InlineData("blocks export PLC_1", "blocks export", "PLC_1")]
+        [InlineData("blocks import --from x", "blocks import", "")]
+        [InlineData("types export", "types export", "")]
+        [InlineData("tables import PLC_1", "tables import", "PLC_1")]
+        [InlineData("blocks PLC_1 --tree", "blocks", "PLC_1")]
+        [InlineData("blocks", "blocks", "")]
+        [InlineData("types PLC_1", "types", "PLC_1")]
+        [InlineData("tables PLC_1", "tables", "PLC_1")]
+        public void APluralIsAGroupOnlyWhenAnActionFollows(string line, string verb, string positionals)
+        {
+            var cmd = CommandLine.Parse(CommandLine.Tokenize(line));
+            Assert.Equal(verb, cmd.Verb);
+            Assert.Equal(positionals, string.Join(" ", cmd.Positionals));
+        }
+    }
+
     public class TokenizeTests
     {
         [Fact]

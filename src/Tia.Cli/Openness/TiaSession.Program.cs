@@ -171,15 +171,22 @@ namespace TiaCli.Openness
                 Failed = new List<BlockProblemDto>(),
             };
 
-            var language = EditingLanguage();
             var changes = Place(software, result, changed ?? new List<string>());
             var deletions = Place(software, result, deleted ?? new List<string>());
+            ApplyAll(software, result, changes, deletions);
+            return result;
+        }
+
+        private void ApplyAll(PlcSoftware software, ProgramSyncDto result, List<ProgramFile> changes,
+            List<ProgramFile> deletions)
+        {
+            var language = EditingLanguage();
 
             foreach (var file in changes.Where(f => f.Part == Part.Tags))
                 Apply(result, file, "imported", () => ApplyTagTable(software, file, language));
             foreach (var file in changes.Where(f => f.Part == Part.Types))
                 Apply(result, file, "imported", () => GenerateFrom(software, file));
-            foreach (var file in changes.Where(f => f.Part == Part.Blocks))
+            foreach (var file in changes.Where(f => f.Part == Part.Blocks).OrderBy(f => BlockOrder(f.Extension)))
                 Apply(result, file, "imported", () => ImportBlock(software, file));
 
             foreach (var file in deletions.Where(f => f.Part == Part.Blocks))
@@ -188,7 +195,85 @@ namespace TiaCli.Openness
                 Apply(result, file, "deleted", () => FindType(software, file).Delete());
             foreach (var file in deletions.Where(f => f.Part == Part.Tags))
                 Apply(result, file, "deleted", () => DeleteTagTable(software, file));
+        }
 
+        /// <summary>
+        /// Code blocks before data blocks: an instance DB is generated against its FB, and a DB
+        /// declared over a type needs the type, so the .db files go in last. Calls between code
+        /// blocks need no order - the compile resolves those.
+        /// </summary>
+        internal static int BlockOrder(string extension)
+        {
+            switch (extension)
+            {
+                case ".xml": return 0;
+                case ".scl": return 1;
+                case ".awl": return 2;
+                case ".db": return 3;
+                default: return 4;
+            }
+        }
+
+        private static readonly Dictionary<Part, string[]> PartExtensions = new Dictionary<Part, string[]>
+        {
+            { Part.Blocks, new[] { ".scl", ".awl", ".db", ".xml" } },
+            { Part.Types, new[] { TypeExtension } },
+            { Part.Tags, new[] { TagTableExtension } },
+        };
+
+        /// <summary>
+        /// Every file of one part under <paramref name="directory"/> into the project, its folders
+        /// becoming folders in TIA's tree - what 'blocks import', 'types import' and 'tables import'
+        /// do. Nothing is deleted: a folder of files says what should be there, not what should go.
+        /// With <paramref name="underRoot"/> the files are looked for one folder down, in the one
+        /// named like TIA's own ("Program blocks"), as the matching export writes them.
+        /// </summary>
+        public ProgramSyncDto ImportFolder(string deviceName, string directory, string partName, bool underRoot)
+        {
+            var software = RequirePlcSoftware(deviceName);
+            Part part;
+            string root;
+            switch ((partName ?? "").ToLowerInvariant())
+            {
+                case "blocks": part = Part.Blocks; root = software.BlockGroup.Name; break;
+                case "types": part = Part.Types; root = software.TypeGroup.Name; break;
+                case "tables": part = Part.Tags; root = software.TagTableGroup.Name; break;
+                default:
+                    throw new SessionException(WireErrorCodes.InvalidRequest, $"Nothing to import called '{partName}'.");
+            }
+
+            var folder = Path.GetFullPath(underRoot ? Path.Combine(directory, SafeFileName(root)) : directory);
+            if (!Directory.Exists(folder))
+                throw new SessionException(WireErrorCodes.NotFound, $"No folder {folder} to import from.",
+                    "The matching export writes it; --from <dir> names another.");
+
+            var result = new ProgramSyncDto
+            {
+                Directory = folder,
+                Applied = new List<SyncedFileDto>(),
+                Failed = new List<BlockProblemDto>(),
+            };
+
+            var files = Directory.GetFiles(folder, "*", SearchOption.AllDirectories)
+                .Where(f => PartExtensions[part].Contains(Path.GetExtension(f).ToLowerInvariant()))
+                .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                .Select(f =>
+                {
+                    var relative = f.Substring(folder.TrimEnd('\\', '/').Length + 1).Replace('\\', '/');
+                    var segments = relative.Split('/');
+                    return new ProgramFile
+                    {
+                        Relative = relative,
+                        FullPath = f,
+                        Part = part,
+                        Folders = segments.Take(segments.Length - 1).ToList(),
+                        Name = Path.GetFileNameWithoutExtension(f),
+                        Extension = Path.GetExtension(f).ToLowerInvariant(),
+                    };
+                })
+                .ToList();
+
+            ApplyAll(software, result, files, new List<ProgramFile>());
             return result;
         }
 

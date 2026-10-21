@@ -413,7 +413,8 @@ END_FUNCTION_BLOCK
     $tagCsv = Join-Path $ProjectDir 'FieldTags.csv'
     Case -Name 'table export' -Group core -TiaArgs @('table', 'export', 'PLC_1', 'FieldTags', '--out', $tagCsv)
     Case -Name 'table import' -Group core -TiaArgs @('table', 'import', 'PLC_1', $tagCsv)
-    Case -Name 'table export --all' -Group core -TiaArgs @('table', 'export', 'PLC_1', '--all', '--out', (Join-Path $ProjectDir 'all-tags'))
+    Case -Name 'tables export' -Group core -TiaArgs @('tables', 'export', 'PLC_1', '--out', (Join-Path $ProjectDir 'all-tags'))
+    Case -Name 'tables import' -Group core -TiaArgs @('tables', 'import', 'PLC_1', '--from', (Join-Path $ProjectDir 'all-tags'))
     $xml = Join-Path $ProjectDir 'Motor.xml'
 
     $function = @'
@@ -449,8 +450,9 @@ END_FUNCTION
     Case -Name 'block source to stdout' -Group core -TiaArgs @('block', 'source', 'PLC_1', 'Twice')
     Case -Name 'block export' -Group core -TiaArgs @('block', 'export', 'PLC_1', 'Motor', '--out', $xml)
     Case -Name 'block export --print' -Group core -TiaArgs @('block', 'export', 'PLC_1', 'Motor', '--print')
-    Case -Name 'block export --all' -Group core -TiaArgs @('block', 'export', 'PLC_1', '--all', '--out', (Join-Path $ProjectDir 'all-xml'))
-    Case -Name 'block export --all --source' -Group core -TiaArgs @('block', 'export', 'PLC_1', '--all', '--source', '--out', (Join-Path $ProjectDir 'all-src'))
+    Case -Name 'blocks export' -Group core -TiaArgs @('blocks', 'export', 'PLC_1', '--out', (Join-Path $ProjectDir 'all-xml'))
+    Case -Name 'blocks export --source' -Group core -TiaArgs @('blocks', 'export', 'PLC_1', '--source', '--out', (Join-Path $ProjectDir 'all-src'))
+    Case -Name 'blocks import' -Group core -TiaArgs @('blocks', 'import', 'PLC_1', '--from', (Join-Path $ProjectDir 'all-src'))
 
     $udt = @'
 TYPE "MotorData"
@@ -467,7 +469,8 @@ END_TYPE
     Case -Name 'types'       -Group core -TiaArgs @('types', 'PLC_1')
     Case -Name 'type export' -Group core -TiaArgs @('type', 'export', 'PLC_1', 'MotorData', '--out', $udtFile)
     Case -Name 'type import' -Group core -TiaArgs @('type', 'import', 'PLC_1', $udtFile)
-    Case -Name 'type export --all' -Group core -TiaArgs @('type', 'export', 'PLC_1', '--all', '--out', (Join-Path $ProjectDir 'all-types'))
+    Case -Name 'types export' -Group core -TiaArgs @('types', 'export', 'PLC_1', '--out', (Join-Path $ProjectDir 'all-types'))
+    Case -Name 'types import' -Group core -TiaArgs @('types', 'import', 'PLC_1', '--from', (Join-Path $ProjectDir 'all-types'))
 
     Case -Name 'block rename'      -Group core -TiaArgs @('block', 'rename', 'PLC_1', 'Motor', 'MotorRenamed')
     Case -Name 'block rename back' -Group core -TiaArgs @('block', 'rename', 'PLC_1', 'MotorRenamed', 'Motor')

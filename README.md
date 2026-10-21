@@ -330,9 +330,10 @@ Run `tia help` for the full text.
 | `tia device protection <station>` | Access level and passwords (`--level`, `--password`, `--secret`). A current CPU will not compile until the last two are set |
 | `tia blocks <station>` | List blocks (`--filter`, `--type OB,FB,FC,DB`, `--tree`, `--system`) |
 | `tia block show <station> <block>` | Header, interface and network titles |
-| `tia block source <station> <block>` | The block as SCL/STL/DB text (`--out <path>`, `--deps`). `--all` is `block export --all --source` |
+| `tia block source <station> <block>` | The block as SCL/STL/DB text (`--out <path>`, `--deps`) |
 | `tia block export <station> <block>` | Openness XML (`--out <path>`, `--print`) |
-| `tia block export <station> --all` | Every block into the program's folders (`--out <dir>`, `--source` for text where there is one, `--filter`, `--type`). Default `<station>/Program blocks/`, under `source/` in a workspace |
+| `tia blocks export [<station>]` | Every block into the program's folders (`--source` for text where there is one, `--out <dir>`, `--filter`, `--type`). Default `<station>/Program blocks/`, under `source/` in a workspace |
+| `tia blocks import [<station>]` | Every `.scl`, `.awl`, `.db` and `.xml` in a folder, its folders becoming the program's (`--from <dir>`, same default). Deletes and compiles nothing |
 | `tia block import <station> <file>` | Blocks from Openness XML (`--folder <path>`, `--overwrite`) |
 | `tia block rename <station> <block> <new>` | Rename a block |
 | `tia block delete <station> <block>` | Delete a block (`--force` skips the question) |
@@ -345,10 +346,12 @@ Run `tia help` for the full text.
 | `tia tags <station>` | Tags as CSV, never JSON. `--table <t>` prints that table's own file |
 | `tia table add <station> <name>` | Create a tag table |
 | `tia tag add <station> <name>` | Create a tag (`--table <t>`, default the default table; `--type <dt>`, `--address <addr>`) |
-| `tia table export <station> <table>` | One tag table as CSV (`--out <file>`); `--all` for every table (`--out <dir>`, default `<station>/PLC tags/`) |
+| `tia table export <station> <table>` | One tag table as CSV (`--out <file>`) |
+| `tia tables export [<station>]` / `tables import` | Every tag table, out (`--out <dir>`) or in (`--from <dir>`). Default `<station>/PLC tags/` |
 | `tia table import <station> <file.csv>` | The table holds exactly the file's tags afterwards (`--name`, `--folder`) |
 | `tia types <station>` | PLC data types (UDTs) |
-| `tia type export <station> <type>` | One data type as `.udt` (`--out <file>`); `--all` for every type (`--out <dir>`, default `<station>/PLC data types/`) |
+| `tia type export <station> <type>` | One data type as `.udt` (`--out <file>`) |
+| `tia types export [<station>]` / `types import` | Every data type, out (`--out <dir>`) or in (`--from <dir>`). Default `<station>/PLC data types/` |
 | `tia type import <station> <file.udt>` | Generate the data type(s) in a `.udt` file (`--folder`) |
 | `tia compile <station>` | Compile. Exits non-zero when it reports errors. |
 | `tia download <station>` | Download to the PLC (`--address`, `--via`, `--interface`, `--target`, `--slot`, `--hardware`, `--changes`, `--stopped`, `--force`, `--secret`, `--plc-password`) |
@@ -371,8 +374,9 @@ The longer road does a part on its own; the shorter one does the whole job.
 
 | Job | Commands |
 | --- | --- |
-| The whole program out | `tia export` = `block export --all --source` + `table export --all` + `type export --all`. Only `export` also deletes the files of what is gone from the project |
-| Every block as text | `block source --all` = `block export --all --source` |
+| The whole program out | `tia export` = `blocks export --source` + `types export` + `tables export`. Only `export` also deletes the files of what is gone from the project |
+| The whole program in | `tia sync` (what git says changed, deletions too, then a compile) · `blocks import` + `types import` + `tables import` (everything in the folders, nothing deleted, no compile) |
+| One or all | Singular for one - `block export Motor` - plural for all - `blocks export`. The older `--all` (`block export --all`, `block source --all`, ...) still works |
 | Text into the project | `source add` (keeps the external source) · `sync --file` (removes it) · `type import` (`.udt`) |
 | An XML block in | `block import` · `sync --file <file.xml>` |
 | A tag table in | `table import` · `sync --file <file.csv>` |

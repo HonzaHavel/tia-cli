@@ -94,13 +94,13 @@ tia blocks <dev> --type FB,FC --filter Motor --json    # --system includes syste
 tia block show <dev> <block> --json       # header, full interface, network titles
 tia block source <dev> <block>            # the code as SCL / STL / DB text; --deps adds the UDTs it uses
 tia block export <dev> <block> --print    # Openness XML — the only form for LAD, FBD and GRAPH
-tia block export <dev> --all --source --out <dir>   # every block at once, text where it exists
+tia blocks export <dev> --source --out <dir>   # every block at once, text where it exists; 'blocks import <dev> --from <dir>' takes a folder back
 tia sources <dev> --json                  # external source files in the project
 tia tables <dev> --json                   # tag tables
 tia tags <dev> --table <t>                # tags as CSV (never JSON); all tables, with a Table column, if --table omitted
-tia table export <dev> <t> --out t.csv    # one table's CSV; --all for every table. 'table import <dev> t.csv' takes it back
+tia table export <dev> <t> --out t.csv    # one table's CSV; 'tables export <dev>' for every table. 'table import <dev> t.csv' takes it back
 tia types <dev> --json                    # PLC data types (UDTs)
-tia type export <dev> <type> --out T.udt  # one type as .udt text; --all for every type. 'type import <dev> T.udt' generates it
+tia type export <dev> <type> --out T.udt  # one type as .udt text; 'types export <dev>' for every type. 'type import <dev> T.udt' generates it
 tia device attrs <dev> --filter <text>    # the CPU's Openness attributes and values
 ```
 

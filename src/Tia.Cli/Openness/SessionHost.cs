@@ -203,6 +203,9 @@ namespace TiaCli.Openness
                 case "program.sync": return _session.SyncProgram(
                     p.RequiredString("device"), p.RequiredString("directory"),
                     p.Strings("changed"), p.Strings("deleted"));
+                case "program.importFolder": return _session.ImportFolder(
+                    p.RequiredString("device"), p.RequiredString("directory"), p.RequiredString("part"),
+                    p.Bool("underRoot", false));
                 case "block.exportAll": return _session.ExportAllBlocks(
                     p.RequiredString("device"), p.RequiredString("directory"), p.Bool("asSource", false),
                     p.String("filter"), p.String("type"), p.Bool("underRoot", false));

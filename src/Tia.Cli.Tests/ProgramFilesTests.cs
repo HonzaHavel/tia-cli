@@ -120,6 +120,14 @@ namespace TiaCli.Tests
         }
 
         [Fact]
+        public void DataBlocksGoInAfterTheCodeTheyDependOn()
+        {
+            var order = new[] { ".db", ".scl", ".xml", ".awl" }
+                .OrderBy(TiaCli.Openness.TiaSession.BlockOrder).ToArray();
+            Assert.Equal(".db", order.Last());
+        }
+
+        [Fact]
         public void NothingChangedIsNoPaths()
         {
             Assert.Empty(ProgramCommands.ParseStatus(""));
@@ -149,6 +157,17 @@ namespace TiaCli.Tests
         [InlineData("type export MotorData", "PLC_1 MotorData")]
         [InlineData("type export --all --out x", "PLC_1")]
         [InlineData("type import MotorData.udt", "PLC_1 MotorData.udt")]
+        [InlineData("type export PLC_2 MotorData", "PLC_2 MotorData")]
+        [InlineData("blocks export --source", "PLC_1")]
+        [InlineData("blocks import --from x", "PLC_1")]
+        [InlineData("types export PLC_2", "PLC_2")]
+        [InlineData("tables import", "PLC_1")]
+        public void PluralsTakeTheWorkspacesStationToo(string line, string positionals)
+        {
+            ExportAndSyncTakeTheWorkspacesStation(line, positionals);
+        }
+
+        [Theory]
         [InlineData("type export PLC_2 MotorData", "PLC_2 MotorData")]
         public void ExportAndSyncTakeTheWorkspacesStation(string line, string positionals)
         {

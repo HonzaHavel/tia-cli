@@ -125,18 +125,23 @@ PROGRAM BLOCKS
   block source <station> <block>
                            Print the block as SCL/STL/DB text   [--out <path>] [--deps]
                            LAD, FBD and GRAPH blocks have no text form - use 'block export'.
-                           With --all: the same as 'block export --all --source'.
   block export <station> <block>
                            Export a block as Openness XML  [--out <path>] [--print]
-  block export <station> --all
-                           Every block, one file each, in the program's folders
-                                 [--out <dir>]  [--filter] [--type]
-                                 default: <station>/Program blocks, under source/ in a
-                                 workspace, under the current folder elsewhere
-                                 [--source] SCL/STL/DB blocks as text, the rest as XML
-                                 Overwrites files there but deletes none.
   block import <station> <file>
                            Import blocks from Openness XML [--folder <path>] [--overwrite]
+  blocks export [<station>]
+                           Every block, one file each, in the program's folders
+                                 [--source] SCL/STL/DB blocks as text, the rest as XML
+                                 [--out <dir>]  [--filter <text>] [--type OB,FB,FC,DB]
+                                 Overwrites files there but deletes none.
+  blocks import [<station>]
+                           Every block file in a folder - .scl, .awl, .db, .xml - its folders
+                           becoming the program's. Deletes nothing, compiles nothing.
+                                 [--from <dir>]
+
+  The plural exports and imports default to <station>/<the part's folder in TIA's tree> -
+  Program blocks, PLC data types, PLC tags - under source/ in a workspace and under the current
+  folder elsewhere: the layout 'tia export' writes.
   block rename <station> <block> <new name>
                            Rename a block. Callers are not rewritten; compile to find them.
   block delete <station> <block>
@@ -169,13 +174,15 @@ TAGS (as CSV: Name, Data Type, Logical Address, Comment, Hmi Visible, Hmi Access
                            Create a tag table
   table export <station> <table>
                            One tag table as CSV            [--out <file>, default ./<table>.csv]
-  table export <station> --all
-                           Every tag table, in its folders [--out <dir>]
-                                 default: <station>/PLC tags, under source/ in a workspace
   table import <station> <file.csv>
                            Make the table hold exactly the file's tags: created, changed, and
                            deleted when not listed. User constants are left alone.
                                  [--name <table>, default the file's name] [--folder <path>]
+  tables export [<station>]
+                           Every tag table, in its folders [--out <dir>]
+  tables import [<station>]
+                           Every tag table .csv in a folder, as 'table import' each
+                                 [--from <dir>]
   tag add <station> <name>
                            Create a tag       [--table <t>] [--type <dt>] [--address <addr>]
 
@@ -183,11 +190,13 @@ DATA TYPES (as .udt text)
   types <station>          List PLC data types
   type export <station> <type>
                            One data type as .udt           [--out <file>, default ./<type>.udt]
-  type export <station> --all
-                           Every data type, in its folders [--out <dir>]
-                                 default: <station>/PLC data types, under source/ in a workspace
   type import <station> <file.udt>
                            Generate the data type(s) in the file   [--folder <path>]
+  types export [<station>]
+                           Every data type, in its folders [--out <dir>]
+  types import [<station>]
+                           Every .udt in a folder, its folders becoming the types' folders
+                                 [--from <dir>]
 
   compile <station>        Compile the PLC software. Exits non-zero when it reports errors.
 
@@ -241,7 +250,7 @@ EXAMPLES
   tia block show PLC_1 Motor                   # interface and networks, without opening TIA
   tia block source PLC_1 Motor > Motor.scl     # round-trips through 'tia source add'
   tia block export PLC_1 Motor --print > Motor.xml
-  tia block export PLC_1 --all --source --out program   # every block, without a workspace
+  tia blocks export PLC_1 --source             # every block, the text ones as text
   tia export && git diff                       # in a workspace: the program as files, and what moved
   tia sync && git commit -am ""Motor fix""     # bring edits back, compile, commit only if clean
   type block.scl | tia source add PLC_1 Motor

@@ -3,6 +3,29 @@
 Notable changes to tia-cli. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+**Plural for all of them: `blocks`, `types` and `tables` export and import.** One is singular,
+all is plural - `tia block export PLC_1 Motor`, `tia blocks export PLC_1` - so taking everything
+no longer needs `--all` hung on a command named for one thing. `tia blocks`, `tia types` and
+`tia tables` on their own still list.
+
+- `blocks export`, `types export` and `tables export` write every block, data type or tag table,
+  into `<station>/Program blocks`, `PLC data types` or `PLC tags` by default - under `source/` in a
+  workspace - or `--out <dir>`. `blocks export --source` writes the text ones as text.
+- `blocks import`, `types import` and `tables import` are new: every file of that part in a folder
+  (`--from <dir>`, same default) into the project, its folders becoming TIA's. Nothing is deleted
+  and nothing compiled - the whole-workspace version with deletions and a compile is `tia sync`.
+- `--all` (`block export --all`, `block source --all`, `table export --all`, `type export --all`)
+  still works, and is no longer in the help.
+
+### Fixed
+
+- `tia sync` brings code blocks in before data blocks, so an instance DB no longer fails because
+  its FB had not been generated yet.
+
 ## 0.4.1 — 2026-10-21
 
 ### Added

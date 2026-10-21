@@ -28,6 +28,20 @@ namespace TiaCli.Cli
             "daemon", "show", "sim", "hw",
         };
 
+        /// <summary>
+        /// Lists that are a group only when an action follows: "tia blocks" lists, "tia blocks export"
+        /// exports every block. Anything else after them - "tia blocks PLC_1" - is an argument.
+        /// </summary>
+        private static readonly HashSet<string> Collections = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "blocks", "types", "tables",
+        };
+
+        private static readonly HashSet<string> CollectionActions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "export", "import",
+        };
+
         public string Verb { get; private set; } = string.Empty;
         public List<string> Positionals { get; } = new List<string>();
         private readonly Dictionary<string, string> _values =
@@ -76,7 +90,8 @@ namespace TiaCli.Cli
 
             if (words.Count > 0)
             {
-                if (Groups.Contains(words[0]) && words.Count > 1)
+                if (words.Count > 1 && (Groups.Contains(words[0]) ||
+                                        (Collections.Contains(words[0]) && CollectionActions.Contains(words[1]))))
                 {
                     line.Verb = words[0].ToLowerInvariant() + " " + words[1].ToLowerInvariant();
                     line.Positionals.AddRange(words.Skip(2));

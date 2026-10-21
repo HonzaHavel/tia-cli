@@ -20,7 +20,7 @@ namespace TiaCli.Cli
         private static Workspace Require() =>
             Workspace.Find() ?? throw new WireException(WireErrorCodes.InvalidRequest,
                 $"'tia export' and 'tia sync' work inside a workspace: no {Workspace.DirName} folder here or above.",
-                "'tia init' makes one; 'tia block export <device> --all' exports without one.");
+                "'tia init' makes one; 'tia blocks export <station>', 'tia types export' and 'tia tables export' work without one.");
 
         private static string StationDir(Workspace workspace, string device) =>
             Path.GetFullPath(Path.Combine(workspace.SourceDir, device));
@@ -111,14 +111,15 @@ namespace TiaCli.Cli
         // ---------------------------------------------------------------- one part on its own
 
         /// <summary>
-        /// Where an --all export goes when --out does not say: the station's folder - under source/
-        /// in a workspace, under the current folder elsewhere - and in it the folder TIA's tree
-        /// names the part ("Program blocks", "PLC tags", "PLC data types"), which only the session
-        /// knows, hence <paramref name="underRoot"/>. The layout is the one 'tia export' writes.
+        /// Where a whole part goes, or comes from, when <paramref name="flag"/> (--out or --from)
+        /// does not say: the station's folder - under source/ in a workspace, under the current
+        /// folder elsewhere - and in it the folder TIA's tree names the part ("Program blocks",
+        /// "PLC tags", "PLC data types"), which only the session knows, hence
+        /// <paramref name="underRoot"/>. The layout is the one 'tia export' writes.
         /// </summary>
-        public static string AllDirectory(CommandLine cmd, string device, out bool underRoot)
+        public static string AllDirectory(CommandLine cmd, string device, out bool underRoot, string flag = "out")
         {
-            var given = cmd.Value("out");
+            var given = cmd.Value(flag);
             underRoot = given == null;
             if (given != null) return Path.GetFullPath(given);
 
@@ -145,17 +146,21 @@ namespace TiaCli.Cli
             return failed > 0 ? 1 : 0;
         }
 
-        public static int TableExport(CommandLine cmd, IExecutor executor, Output output)
+        /// <summary>'tables export': every tag table. 'table export --all' is the older spelling.</summary>
+        public static int TablesExport(CommandLine cmd, IExecutor executor, Output output)
         {
             var device = cmd.Positional(0, "station");
-            if (cmd.Has("all"))
-            {
-                NoName(cmd, "tag table");
-                var directory = AllDirectory(cmd, device, out var underRoot);
-                return PrintAll(Commands.Call(executor, "tag.exportTables", new { device, directory, underRoot }),
-                    "tag table(s)", output);
-            }
+            NoName(cmd, "tag table", "tables export");
+            var directory = AllDirectory(cmd, device, out var underRoot);
+            return PrintAll(Commands.Call(executor, "tag.exportTables", new { device, directory, underRoot }),
+                "tag table(s)", output);
+        }
 
+        public static int TableExport(CommandLine cmd, IExecutor executor, Output output)
+        {
+            if (cmd.Has("all")) return TablesExport(cmd, executor, output);
+
+            var device = cmd.Positional(0, "station");
             var table = cmd.Positional(1, "table");
             var target = Path.GetFullPath(cmd.Value("out") ?? table + ".csv");
             return PrintOne(Commands.Call(executor, "tag.exportTable", new { device, table, targetPath = target }), output);
@@ -196,17 +201,21 @@ namespace TiaCli.Cli
             return 0;
         }
 
-        public static int TypeExport(CommandLine cmd, IExecutor executor, Output output)
+        /// <summary>'types export': every data type. 'type export --all' is the older spelling.</summary>
+        public static int TypesExport(CommandLine cmd, IExecutor executor, Output output)
         {
             var device = cmd.Positional(0, "station");
-            if (cmd.Has("all"))
-            {
-                NoName(cmd, "data type");
-                var directory = AllDirectory(cmd, device, out var underRoot);
-                return PrintAll(Commands.Call(executor, "type.exportAll", new { device, directory, underRoot }),
-                    "data type(s)", output);
-            }
+            NoName(cmd, "data type", "types export");
+            var directory = AllDirectory(cmd, device, out var underRoot);
+            return PrintAll(Commands.Call(executor, "type.exportAll", new { device, directory, underRoot }),
+                "data type(s)", output);
+        }
 
+        public static int TypeExport(CommandLine cmd, IExecutor executor, Output output)
+        {
+            if (cmd.Has("all")) return TypesExport(cmd, executor, output);
+
+            var device = cmd.Positional(0, "station");
             var type = cmd.Positional(1, "type");
             var target = Path.GetFullPath(cmd.Value("out") ?? type + ".udt");
             return PrintOne(Commands.Call(executor, "type.export", new { device, type, targetPath = target }), output);
@@ -235,11 +244,39 @@ namespace TiaCli.Cli
             return 0;
         }
 
-        private static void NoName(CommandLine cmd, string what)
+        private static void NoName(CommandLine cmd, string what, string verb)
         {
             if (cmd.PositionalOrNull(1) != null)
                 throw new WireException(WireErrorCodes.InvalidRequest,
-                    $"--all exports every {what}; give a device and no {what} name.");
+                    $"'{verb}' takes every {what}; give a station and no {what} name.",
+                    $"For one, drop the plural: '{verb.Replace("s ", " ")} <station> <name>'.");
+        }
+
+        /// <summary>
+        /// 'blocks import', 'types import', 'tables import': every file of that part under a folder,
+        /// by default where the matching export writes them. Nothing is deleted and nothing is
+        /// compiled - that is 'tia sync', which knows from git what went away.
+        /// </summary>
+        public static int ImportFolder(CommandLine cmd, IExecutor executor, Output output, string part)
+        {
+            var device = cmd.Positional(0, "station");
+            NoName(cmd, part.TrimEnd('s'), part + " import");
+            var directory = AllDirectory(cmd, device, out var underRoot, "from");
+
+            var raw = Commands.Call(executor, "program.importFolder", new { device, directory, part, underRoot });
+            var import = JsonUtil.To<ProgramSyncDto>(raw);
+            var failed = import.Failed?.Count ?? 0;
+            if (output.AsJson) { output.Json(raw); return failed > 0 ? 1 : 0; }
+
+            foreach (var file in import.Applied ?? new List<SyncedFileDto>())
+                output.Detail($"{file.Action,-9} {file.File}");
+            foreach (var problem in import.Failed ?? new List<BlockProblemDto>())
+                output.Warn($"failed {problem.Block}: {problem.Reason}");
+
+            output.Line($"{import.Applied?.Count ?? 0} file(s) from {import.Directory}" +
+                        (failed > 0 ? $", {failed} failed" : ""));
+            output.Detail($"Nothing was compiled; 'tia compile {device}' checks it.");
+            return failed > 0 ? 1 : 0;
         }
 
         /// <summary>
