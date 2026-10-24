@@ -118,9 +118,11 @@ namespace TiaCli.Openness
             {
                 if (string.Equals(Path.GetExtension(path), TagTableXmlExtension, StringComparison.OrdinalIgnoreCase))
                 {
-                    // TIA's own file holds the constants too, so nothing is left out to report.
+                    // TIA's own file holds the constants too, so nothing is left out to report. With
+                    // defaults, as tag tables kept in repositories are: without, every attribute at
+                    // its default - the HMI flags of nearly every tag - is left out of the file.
                     var xml = Fresh(path);
-                    table.Export(xml, ExportOptions.None);
+                    table.Export(xml, ExportOptions.WithDefaults);
                     DropCreatedStamp(xml);
                     xml.Refresh();
                     result.Exported.Add(new ExportResultDto { Name = reference, FilePath = xml.FullName, Bytes = xml.Length });
