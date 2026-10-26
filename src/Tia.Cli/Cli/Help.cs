@@ -170,26 +170,28 @@ EXTERNAL SOURCES
   source delete <station> <name>
                            Delete a source. Blocks it made stay.      [--force]
 
-TAGS (as CSV: Name, Data Type, Logical Address, Comment, Hmi Visible, Hmi Accessible, Hmi Writeable;
-      or with --xml as TIA's own XML, which also holds the user constants and every comment language)
+TAGS (as CSV, one line a tag: Name, Data Type, Logical Address, Comment, Hmi Visible, Hmi Accessible,
+      Hmi Writeable; plus Value when the table has user constants - a row with a value is one - and
+      a 'Comment de-DE' column for each other language with a comment. Or with --xml as TIA's own XML)
   tables <station>         List tag tables
-  tags <station>           Print tags as CSV; never JSON   [--table <name>] gives that table's
-                           own file, which 'table import' takes back
+  tags <station>           Print tags as CSV; never JSON   [--table <name>] that table's tags
   table add <station> <name>
                            Create a tag table
   table export <station> <table>
                            One tag table as CSV            [--out <file>, default ./<table>.csv]
-                                 [--xml] as XML, default ./<table>.xml; an --out ending .xml is too
-  table import <station> <file.csv>
-                           Make the table hold exactly the file's tags: created, changed, and
-                           deleted when not listed. User constants are left alone.
+                                 [--xml] as TIA's XML, default ./<table>.xml; an --out ending .xml is too
+  table import <station> <file.csv|file.xml>
+                           A .csv makes the table hold exactly the file's tags: created, changed,
+                           and deleted when not listed. With a Value column the constants too, and
+                           each language column's comments; without, those are left alone.
                                  [--name <table>, default the file's name] [--folder <path>]
                            A .xml replaces the table it names: tags, constants and comments.
                                  [--folder <path>] for a new table; one TIA has stays where it is
   tables export [<station>]
                            Every tag table, in its folders [--out <dir>] [--xml]
   tables import [<station>]
-                           Every tag table .csv and .xml in a folder, as 'table import' each
+                           Every tag table .csv and .xml in a folder, as 'table import' each.
+                           A table there as both is refused: one would undo the other.
                                  [--from <dir>]
   tag add <station> <name>
                            Create a tag       [--table <t>] [--type <dt>] [--address <addr>]

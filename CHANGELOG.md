@@ -65,6 +65,23 @@ repositories that keep tag tables next to their SCL already hold.
   `--folder` (or the file's folder) when the table is new. `--name` does not apply: the name is in
   the file.
 
+### Changed
+
+**The tag table CSV carries the whole table: user constants and every comment language.** CSV
+stays the form tia writes, because git shows a change as the line it is on: Foodtec's 256-tag table
+is 257 lines as CSV and 25,659 as TIA's XML, where one added tag renumbers every ID after it. What
+the CSV lacked, it now has, in columns that appear only when a table needs them - a table without
+constants or other-language comments reads exactly as before:
+
+- `Value`: a row with a value is a user constant (no address, no HMI flags). With the column, an
+  import makes the constants the file's - created, changed, deleted; without it, they are left alone.
+- `Comment de-DE` and the like: one per language other than the editing one that has a comment,
+  in culture order. With the column, that language's comments are the file's; without, left alone.
+- Going between CSV and XML: a table found as both `Foo.csv` and `Foo.xml` is refused by `sync` and
+  `tables import`, since one would undo the other; a `Foo.xml` deleted with a `Foo.csv` beside it
+  (or the other way round) is a repository changing form, and the table is kept.
+- `--csv` names the default out loud; an `--out` for `table export` must end in `.csv` or `.xml`.
+
 ### Fixed
 
 - Downloads and uploads to a PLC with a certificate no longer fail with "Connect to module failed".

@@ -156,6 +156,7 @@ namespace TiaCli.Tests
         [InlineData("table export FieldTags --xml", "PLC_1 FieldTags")]
         [InlineData("table import FieldTags.xml", "PLC_1 FieldTags.xml")]
         [InlineData("tables export --xml", "PLC_1")]
+        [InlineData("tables export --csv", "PLC_1")]
         [InlineData("types", "PLC_1")]
         [InlineData("type export MotorData", "PLC_1 MotorData")]
         [InlineData("type export --all --out x", "PLC_1")]

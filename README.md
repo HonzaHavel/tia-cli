@@ -81,8 +81,8 @@ tia sync                                  # what git says changed, back into TIA
 ```
 
 `source/PLC_1/` mirrors TIA's tree: `Program blocks/` (SCL, STL and DB blocks as text, LAD, FBD
-and GRAPH as XML), `PLC data types/` (one `.udt` each) and `PLC tags/` (one `.csv` per tag table,
-with the columns of TIA's own Excel export). [GIT-WORKFLOW.md](GIT-WORKFLOW.md) is the whole loop.
+and GRAPH as XML), `PLC data types/` (one `.udt` each) and `PLC tags/` (one `.csv` per tag table, one line
+a tag, with columns for user constants and other comment languages when a table has them). [GIT-WORKFLOW.md](GIT-WORKFLOW.md) is the whole loop.
 
 No session is needed. `tia open` starts TIA Portal the way a double-click does, so it belongs to you
 and closing it is closing the window; every later command finds it by its project and attaches for
@@ -343,12 +343,12 @@ Run `tia help` for the full text.
 | `tia source generate <station> <name>` | Compile a source already in the project (`--folder`) |
 | `tia source delete <station> <name>` | Delete a source; blocks it made stay |
 | `tia tables <station>` | Tag tables |
-| `tia tags <station>` | Tags as CSV, never JSON. `--table <t>` prints that table's own file |
+| `tia tags <station>` | Tags as CSV, never JSON. `--table <t>` prints that table's CSV |
 | `tia table add <station> <name>` | Create a tag table |
 | `tia tag add <station> <name>` | Create a tag (`--table <t>`, default the default table; `--type <dt>`, `--address <addr>`) |
-| `tia table export <station> <table>` | One tag table as CSV (`--out <file>`), or with `--xml` as TIA's own XML, user constants and every comment language included |
-| `tia tables export [<station>]` / `tables import` | Every tag table, out (`--out <dir>`, `--xml`) or in (`--from <dir>`, `.csv` and `.xml`). Default `<station>/PLC tags/` |
-| `tia table import <station> <file.csv>` | The table holds exactly the file's tags afterwards (`--name`, `--folder`). A `.xml` replaces the table it names, constants included |
+| `tia table export <station> <table>` | One tag table as CSV, one line a tag, constants and every comment language included (`--out <file>`), or with `--xml` as TIA's own XML |
+| `tia tables export [<station>]` / `tables import` | Every tag table, out (`--out <dir>`, `--xml`) or in (`--from <dir>`, `.csv` and `.xml`; a table there as both is refused). Default `<station>/PLC tags/` |
+| `tia table import <station> <file.csv\|file.xml>` | A `.csv` makes the table hold exactly the file's tags, and constants when it has a `Value` column (`--name`, `--folder`). A `.xml` replaces the table it names ||file.csv>` | A `.xml` replaces the table it names, constants included. A `.csv` makes the table hold exactly the file's tags (`--name`, `--folder`) |
 | `tia types <station>` | PLC data types (UDTs) |
 | `tia type export <station> <type>` | One data type as `.udt` (`--out <file>`) |
 | `tia types export [<station>]` / `types import` | Every data type, out (`--out <dir>`) or in (`--from <dir>`). Default `<station>/PLC data types/` |
@@ -383,8 +383,8 @@ The longer road does a part on its own; the shorter one does the whole job.
 | Text into the project | `source add` (keeps the external source) · `sync --file` (removes it) · `type import` (`.udt`) |
 | An XML block in | `block import` · `sync --file <file.xml>` |
 | A tag table in | `table import` · `sync --file <file.csv>` (or `.xml`) |
-| One tag table out | `tags --table <t> > t.csv` = `table export <t>` |
-| One tag | `tag add` · a row in the table's CSV, then `table import` or `sync` |
+| One tag table out | `table export <t>` (CSV) · `table export <t> --xml` (TIA's XML) · `tags --table <t>` prints its tags |
+| One tag | `tag add` · a row in the table's CSV (or a tag in its XML), then `table import` or `sync` |
 | Delete a block | `block delete` · delete its file, then `sync` |
 | Open a project | `project open` · `open` in a workspace · `session start --project` · `project retrieve` from an archive |
 | Pick a portal | `--attach` · `TIA_PORTAL` · the workspace |

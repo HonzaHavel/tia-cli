@@ -73,21 +73,42 @@ namespace TiaCli.Tests
         }
 
         [Theory]
-        [InlineData("FieldTags", null, false, "FieldTags.csv")]
-        [InlineData("FieldTags", null, true, "FieldTags.xml")]
-        [InlineData("FieldTags", "out/t.xml", false, "out/t.xml")]
-        [InlineData("FieldTags", "out/t.XML", true, "out/t.XML")]
-        [InlineData("FieldTags", "out/t.csv", false, "out/t.csv")]
-        public void TableExportWritesWhereOutAndXmlSay(string table, string outPath, bool xml, string expected)
+        [InlineData("FieldTags", null, false, false, "FieldTags.csv")]
+        [InlineData("FieldTags", null, true, false, "FieldTags.xml")]
+        [InlineData("FieldTags", null, false, true, "FieldTags.csv")]
+        [InlineData("FieldTags", "out/t.xml", false, false, "out/t.xml")]
+        [InlineData("FieldTags", "out/t.XML", true, false, "out/t.XML")]
+        [InlineData("FieldTags", "out/t.csv", false, false, "out/t.csv")]
+        [InlineData("FieldTags", "out/t.csv", false, true, "out/t.csv")]
+        public void TableExportWritesWhereOutXmlAndCsvSay(string table, string outPath, bool xml, bool csv, string expected)
         {
-            Assert.Equal(expected, ProgramCommands.TableFile(table, outPath, xml));
+            Assert.Equal(expected, ProgramCommands.TableFile(table, outPath, xml, csv));
+        }
+
+        [Theory]
+        [InlineData("t.csv", true, false, "--xml")]
+        [InlineData("t.xml", false, true, "--csv")]
+        [InlineData(null, true, true, "--xml and --csv")]
+        [InlineData("t.txt", false, false, "neither")]
+        public void FormsThatContradictAreRefused(string outPath, bool xml, bool csv, string named)
+        {
+            var error = Assert.Throws<WireException>(() => ProgramCommands.TableFile("FieldTags", outPath, xml, csv));
+            Assert.Contains(named, error.Message);
+        }
+
+        [Theory]
+        [InlineData(@"C:\w\source\PLC_1\PLC tags\Field.csv", @"C:\w\source\PLC_1\PLC tags\Field.xml")]
+        [InlineData(@"C:\w\source\PLC_1\PLC tags\Field.xml", @"C:\w\source\PLC_1\PLC tags\Field.csv")]
+        public void ATableInTheOtherFormBesideItIsFound(string file, string other)
+        {
+            Assert.Equal(other, TiaCli.Openness.TiaSession.OtherForm(file, path => path == other));
+            Assert.Null(TiaCli.Openness.TiaSession.OtherForm(file, path => false));
         }
 
         [Fact]
-        public void XmlWithACsvOutIsRefused()
+        public void OnlyTagTableFilesHaveAnOtherForm()
         {
-            var error = Assert.Throws<WireException>(() => ProgramCommands.TableFile("FieldTags", "t.csv", true));
-            Assert.Contains("--xml", error.Message);
+            Assert.Null(TiaCli.Openness.TiaSession.OtherForm(@"C:\w\Program blocks\Motor.scl", path => true));
         }
     }
 }

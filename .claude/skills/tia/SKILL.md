@@ -98,8 +98,8 @@ tia blocks export <dev> --source --out <dir>   # every block at once, text where
 tia sources <dev> --json                  # external source files in the project
 tia tables <dev> --json                   # tag tables
 tia tags <dev> --table <t>                # tags as CSV (never JSON); all tables, with a Table column, if --table omitted
-tia table export <dev> <t> --out t.csv    # one table's CSV; 'tables export <dev>' for every table. 'table import <dev> t.csv' takes it back
-tia table export <dev> <t> --xml          # TIA's own XML, with user constants and every comment language; 'table import <dev> t.xml' takes it back
+tia table export <dev> <t>                # one table's CSV, one line a tag; a Value column for constants, 'Comment de-DE' per other language. 'table import <dev> t.csv' takes it back
+tia table export <dev> <t> --xml          # TIA's own XML instead; 'tables export <dev>' for every table, --xml too
 tia types <dev> --json                    # PLC data types (UDTs)
 tia type export <dev> <type> --out T.udt  # one type as .udt text; 'types export <dev>' for every type. 'type import <dev> T.udt' generates it
 tia device attrs <dev> --filter <text>    # the CPU's Openness attributes and values

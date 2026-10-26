@@ -473,7 +473,7 @@ END_FUNCTION_BLOCK
     $tagCsv = Join-Path $ProjectDir 'FieldTags.csv'
     Case -Name 'table export' -Group core -TiaArgs @('table', 'export', 'PLC_1', 'FieldTags', '--out', $tagCsv)
     Case -Name 'table import' -Group core -TiaArgs @('table', 'import', 'PLC_1', $tagCsv)
-    Case -Name 'tables export' -Group core -TiaArgs @('tables', 'export', 'PLC_1', '--out', (Join-Path $ProjectDir 'all-tags'))
+    Case -Name 'tables export --csv' -Group core -TiaArgs @('tables', 'export', 'PLC_1', '--csv', '--out', (Join-Path $ProjectDir 'all-tags'))
     Case -Name 'tables import' -Group core -TiaArgs @('tables', 'import', 'PLC_1', '--from', (Join-Path $ProjectDir 'all-tags'))
     $tagXml = Join-Path $ProjectDir 'FieldTags.xml'
     Case -Name 'table export --xml' -Group core -TiaArgs @('table', 'export', 'PLC_1', 'FieldTags', '--xml', '--out', $tagXml)

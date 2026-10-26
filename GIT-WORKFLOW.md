@@ -85,8 +85,8 @@ exit 3, nothing has this project open: run `tia open`.
 tia export
 ```
 
-It writes every block, data type and tag table into `source/PLC_1/` and names anything it skipped -
-a know-how protected block, a tag table's user constants. Then:
+It writes every block, data type and tag table into `source/PLC_1/` and names anything it skipped,
+such as a know-how protected block. Then:
 
 ```bash
 git status
@@ -123,7 +123,14 @@ What you can change as text:
 - **`.udt`** under `PLC data types/`.
 - **`.csv`** under `PLC tags/` - one row per tag: `Name`, `Data Type`, `Logical Address`,
   `Comment`, and the three `Hmi` columns as `True`/`False`. Add a row to add a tag, delete one to
-  delete it. It opens in Excel too.
+  delete it. It opens in Excel too. When a table has them, two more kinds of column appear:
+  - `Value`, for the user constants: a row with a value is a constant (no address, no `Hmi` flags).
+  - `Comment de-DE` and the like, one per language other than the editing one with a comment.
+
+  A file without those columns leaves the constants, or those languages, as they are in TIA. Keep the
+  `Value` column when you delete the last constant, or it is not deleted.
+- A repository can keep TIA's own `.xml` instead (`tia table export --xml`); sync takes both. Keep
+  one form per table in `PLC tags/`: a table there as both is refused.
 
 A `.xml` block is LAD, FBD or GRAPH: edit those in TIA Portal and run `tia export` afterwards. Save,
 then look at what you changed:
@@ -213,11 +220,13 @@ tia export && git status --porcelain
 
 - **Export before you edit.** If anyone changed the project in TIA Portal, run `tia export` and
   commit that first, or your next `tia sync` overwrites their change.
-- **A tag renamed in the CSV is a new tag.** The old one is deleted and a new one created; the
+- **A tag renamed in the file is a new tag.** The old one is deleted and a new one created; the
   compile shows every block that still uses the old name.
-- **User constants stay in TIA.** The CSV holds tags; `tia export` says which tables have
-  constants, and `tia sync` leaves them as they are.
-- **Comments are in the project's editing language.** Other languages are left alone.
+- **The `.csv` holds the whole table:** tags, user constants and comments in every language, one
+  line each - about a hundredth of TIA's `.xml` for the same table.
+- **Switching a repository between `.xml` and `.csv`:** replace the files, commit the swap. `tia
+  sync` on another machine sees `Foo.xml` deleted and `Foo.csv` added, imports the CSV and keeps
+  the table.
 - **Not in the repository:** hardware configuration (keep it in the archive) and know-how
   protected blocks, which `tia export` names and skips.
 - **A broken file still lands in the project.** TIA generates what it can and the compile catches

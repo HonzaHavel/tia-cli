@@ -155,7 +155,7 @@ namespace TiaCli.Cli
             var device = cmd.Positional(0, "station");
             NoName(cmd, "tag table", "tables export");
             var directory = AllDirectory(cmd, device, out var underRoot);
-            var xml = cmd.Has("xml");
+            var xml = TableForm(cmd.Has("xml"), cmd.Has("csv")) == ".xml";
             return PrintAll(Commands.Call(executor, "tag.exportTables", new { device, directory, underRoot, xml }),
                 "tag table(s)", output);
         }
@@ -167,22 +167,41 @@ namespace TiaCli.Cli
 
             var device = cmd.Positional(0, "station");
             var table = cmd.Positional(1, "table");
-            var target = Path.GetFullPath(TableFile(table, cmd.Value("out"), cmd.Has("xml")));
+            var target = Path.GetFullPath(TableFile(table, cmd.Value("out"), cmd.Has("xml"), cmd.Has("csv")));
             return PrintOne(Commands.Call(executor, "tag.exportTable", new { device, table, targetPath = target }), output);
         }
 
         /// <summary>
-        /// Where 'table export' writes: --out, else the table's name with .csv, or .xml with --xml.
-        /// The session picks the form from the extension, so --xml and an --out of another kind
-        /// contradict each other.
+        /// The extension a tag table is written with: CSV unless --xml. --csv says the default out
+        /// loud.
         /// </summary>
-        internal static string TableFile(string table, string outPath, bool xml)
+        internal static string TableForm(bool xml, bool csv)
         {
-            if (outPath == null) return table + (xml ? ".xml" : ".csv");
-            if (xml && !string.Equals(Path.GetExtension(outPath), ".xml", StringComparison.OrdinalIgnoreCase))
+            if (xml && csv)
+                throw new WireException(WireErrorCodes.InvalidRequest, "--xml and --csv ask for two forms at once.",
+                    "CSV is the default; --xml writes TIA's own XML.");
+            return xml ? ".xml" : ".csv";
+        }
+
+        /// <summary>
+        /// Where 'table export' writes: --out, else the table's name with .csv, or .xml with --xml.
+        /// The session picks the form from the extension, so an --out must be one of the two, and
+        /// one that contradicts --xml or --csv is refused.
+        /// </summary>
+        internal static string TableFile(string table, string outPath, bool xml, bool csv)
+        {
+            var form = TableForm(xml, csv);
+            if (outPath == null) return table + form;
+
+            var extension = Path.GetExtension(outPath).ToLowerInvariant();
+            if (extension != ".xml" && extension != ".csv")
                 throw new WireException(WireErrorCodes.InvalidRequest,
-                    $"--xml writes TIA's XML, and {Path.GetFileName(outPath)} is not an .xml file.",
-                    "Name the file .xml, or drop --xml for CSV.");
+                    $"{Path.GetFileName(outPath)} is neither .xml nor .csv, and the extension says which a tag table is.",
+                    "Name the file .xml for TIA's XML, or .csv for CSV.");
+            if ((xml || csv) && extension != form)
+                throw new WireException(WireErrorCodes.InvalidRequest,
+                    $"--{form.Substring(1)} and {Path.GetFileName(outPath)} ask for two forms at once.",
+                    $"Name the file {form}, or drop --{form.Substring(1)}.");
             return outPath;
         }
 

@@ -88,6 +88,17 @@ by its project file - never to whatever portal happens to be running. `tia open`
 Portal with `.tia/project`, or retrieves `.tia/archive` into it, and exits; commands attach per
 call, and only `--headless` needs a session.
 
+To finish the workspace (next feature):
+
+- **Two forms of the same thing, only the human one in git (idea, 2026-10-26).** Tags and hardware
+  have the same shape: a form people read and git diffs well (tag CSV, `hardware.yaml`) and the
+  form TIA reads (tag XML, CAx AML), with tia converting between them. The workspace could keep
+  both - the human form in `source/`, committed; TIA's form generated beside it under `.tia/`, not
+  committed, like `.tia/project` - so nothing in git is ever TIA's verbose form, and the TIA form is
+  there to import, compare or hand to tools that want it.
+- Open with it: repositories that already commit TIA's XML (the team's, and the viewer extension
+  that reads them) - whether a `.tia/config` setting picks which form is committed.
+
 ## 2. The program as files in `source/`
 
 One folder per station, mirroring TIA's tree:
@@ -95,13 +106,21 @@ One folder per station, mirroring TIA's tree:
 ```
 source/PLC_1/
   PLC data types/   *.udt
-  PLC tags/         *.csv, written and read by tia-cli through the tag API (TIA has no CSV)
+  PLC tags/         *.csv, written and read by tia through the tag API; TIA's *.xml on request
   Program blocks/   *.scl (SCL), *.awl (STL), *.db (DB), *.xml (LAD, FBD, GRAPH, everything else)
 ```
 
 `tia export` writes it all in one call, `tia sync` brings back what git says changed and compiles
-- both built (2026-10-21), not yet run against a licensed TIA. Still open: user constants in the
-CSV, and whether a new `.udt` lands in its folder. Found while planning, and to use:
+- both built (2026-10-21), not yet run against a licensed TIA. Still open: whether a new `.udt`
+lands in its folder. Found while planning, and to use:
+
+- **Tag tables stay CSV (decided 2026-10-26).** XML was the default for one build and went back:
+  Foodtec's 256-tag table is 257 lines as CSV and 25,659 as XML (about 85 of every 100 are empty
+  comment slots for 14 languages), and TIA numbers IDs through the file, so one added tag rewrites
+  every line after it. Instead the CSV carries what it lacked: a `Value` column for user constants
+  and a `Comment <culture>` column per other language - only when a table has them. TIA's XML
+  (HonzaHavel's PR #1) stays as `--xml`. A table as both `.csv` and `.xml` in one folder is
+  refused; one form deleted with the other beside it is a change of form, not a deletion.
 
 - Every part of the three folders can be exported and imported natively: `PlcBlock.Export`,
   `PlcType.Export` / `PlcTypeComposition.Import`, `PlcTagTable.Export` /

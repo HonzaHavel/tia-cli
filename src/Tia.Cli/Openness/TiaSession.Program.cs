@@ -26,8 +26,17 @@ namespace TiaCli.Openness
     internal sealed partial class TiaSession
     {
         private const string TypeExtension = ".udt";
+        /// <summary>
+        /// A tag table as CSV, the form tia writes by default: one line per tag or constant, so git
+        /// shows a change as the line it is on. Comments in other languages and the constants get
+        /// columns of their own when a table has them (see TagCsv).
+        /// </summary>
         private const string TagTableExtension = ".csv";
-        /// <summary>A tag table as TIA exports it, constants and every language included (see TagTableXml).</summary>
+        /// <summary>
+        /// A tag table as TIA exports it (see TagTableXml), for repositories that keep TIA's own form.
+        /// About a hundred lines a tag, and IDs numbered through the file, so one added tag renumbers
+        /// every one after it.
+        /// </summary>
         private const string TagTableXmlExtension = ".xml";
 
         // ---------------------------------------------------------------- export
@@ -129,29 +138,32 @@ namespace TiaCli.Openness
                     return;
                 }
 
+                // Tags, then the constants; comments in other languages and the constants' values
+                // become columns of their own, so the file has everything the table does.
+                var language = EditingLanguage();
                 var rows = table.Tags.Cast<PlcTag>().Select(tag => new TagRow
                 {
                     Name = tag.Name,
                     DataType = tag.DataTypeName,
                     Address = tag.LogicalAddress,
-                    Comment = EditingText(tag.Comment),
+                    Comment = CommentIn(tag.Comment, language),
+                    Comments = OtherComments(tag.Comment, language),
                     HmiVisible = tag.ExternalVisible,
                     HmiAccessible = tag.ExternalAccessible,
                     HmiWriteable = tag.ExternalWritable,
-                });
+                }).Concat(table.UserConstants.Cast<PlcUserConstant>().Select(constant => new TagRow
+                {
+                    Name = constant.Name,
+                    DataType = constant.DataTypeName,
+                    Value = constant.Value ?? "",
+                    Comment = CommentIn(constant.Comment, language),
+                    Comments = OtherComments(constant.Comment, language),
+                }));
 
                 var file = Fresh(path);
                 File.WriteAllText(file.FullName, TagCsv.Write(rows), TagCsv.FileEncoding);
                 file.Refresh();
                 result.Exported.Add(new ExportResultDto { Name = reference, FilePath = file.FullName, Bytes = file.Length });
-
-                // The CSV holds tags. Constants stay in TIA, and sync leaves them alone.
-                if (table.UserConstants.Count > 0)
-                    result.Skipped.Add(new BlockProblemDto
-                    {
-                        Block = reference,
-                        Reason = $"{table.UserConstants.Count} user constant(s) not in the CSV; they stay as they are in TIA",
-                    });
             }
             catch (Exception error) when (!AlreadyExplained(error))
             {
@@ -203,7 +215,19 @@ namespace TiaCli.Openness
             var language = EditingLanguage();
 
             foreach (var file in changes.Where(f => f.Part == Part.Tags))
-                Apply(result, file, "imported", () => ApplyTagTable(software, file, language));
+            {
+                var twin = OtherForm(file.FullPath, File.Exists);
+                if (twin != null)
+                {
+                    result.Failed.Add(new BlockProblemDto
+                    {
+                        Block = file.Relative,
+                        Reason = $"{Path.GetFileName(twin)} beside it is the same tag table, and one would undo the other. Keep one.",
+                    });
+                    continue;
+                }
+                Apply(result, file, "imported", () => ApplyTagTable(software, file, language, ProjectLanguage));
+            }
             foreach (var file in changes.Where(f => f.Part == Part.Types))
                 Apply(result, file, "imported", () => GenerateFrom(software, file));
             foreach (var file in changes.Where(f => f.Part == Part.Blocks).OrderBy(f => BlockOrder(f.Extension)))
@@ -214,7 +238,32 @@ namespace TiaCli.Openness
             foreach (var file in deletions.Where(f => f.Part == Part.Types))
                 Apply(result, file, "deleted", () => FindType(software, file).Delete());
             foreach (var file in deletions.Where(f => f.Part == Part.Tags))
+            {
+                // A Foo.csv gone and a Foo.xml in its place is the table changing form, not going.
+                var now = OtherForm(file.FullPath, File.Exists);
+                if (now != null)
+                {
+                    result.Applied.Add(new SyncedFileDto { File = $"{file.Relative} (now {Path.GetFileName(now)})", Action = "kept" });
+                    continue;
+                }
                 Apply(result, file, "deleted", () => DeleteTagTable(software, file));
+            }
+        }
+
+        /// <summary>
+        /// The same tag table in the other form - Foo.xml beside Foo.csv - when it is there. Both at
+        /// once cannot be applied, since one would undo the other; and a deleted Foo.csv with a
+        /// Foo.xml beside it is a table that changed form, which must not be deleted from TIA.
+        /// </summary>
+        internal static string OtherForm(string fullPath, Func<string, bool> exists)
+        {
+            var extension = Path.GetExtension(fullPath).ToLowerInvariant();
+            var other = extension == TagTableExtension ? TagTableXmlExtension
+                : extension == TagTableXmlExtension ? TagTableExtension
+                : null;
+            if (other == null) return null;
+            var path = Path.ChangeExtension(fullPath, other);
+            return exists(path) ? path : null;
         }
 
         /// <summary>
@@ -431,11 +480,14 @@ namespace TiaCli.Openness
 
         /// <summary>
         /// Makes the table hold exactly the tags its CSV lists: missing ones created, the rest
-        /// brought into line, and tags the CSV no longer has deleted. User constants are not in the
-        /// CSV and are not touched. A tag renamed in the file is a delete and a create here, as it
+        /// brought into line, and tags the CSV no longer has deleted. With a Value column the user
+        /// constants are made the file's the same way; without one they are not touched. Comments
+        /// go into the editing language, and into each language the file has a column for; other
+        /// languages are left alone. A tag renamed in the file is a delete and a create here, as it
         /// would be in the file's own diff.
         /// </summary>
-        private static void ApplyTagTable(PlcSoftware software, ProgramFile file, Language language)
+        private static void ApplyTagTable(PlcSoftware software, ProgramFile file, Language language,
+            Func<string, Language> languageOf)
         {
             if (file.Extension != TagTableExtension && file.Extension != TagTableXmlExtension)
                 throw new SessionException(WireErrorCodes.InvalidRequest,
@@ -448,24 +500,52 @@ namespace TiaCli.Openness
                 return;
             }
 
-            List<TagRow> rows;
+            TagTableCsv csv;
             try
             {
-                rows = TagCsv.Read(File.ReadAllText(file.FullPath, TagCsv.FileEncoding));
+                csv = TagCsv.ReadTable(File.ReadAllText(file.FullPath, TagCsv.FileEncoding));
             }
             catch (WireException error)
             {
                 throw new SessionException(error.Code, error.Message, error.Hint);
             }
 
+            // Every language column has to be one of the project's before anything changes.
+            var languages = csv.Languages.ToDictionary(culture => culture, culture => languageOf(culture)
+                ?? throw new SessionException(WireErrorCodes.InvalidRequest,
+                    $"Column 'Comment {culture}': {culture} is not one of the project's languages.",
+                    "Add it in TIA under Project languages, or drop the column."), StringComparer.OrdinalIgnoreCase);
+
+            var tags = csv.Rows.Where(r => !r.IsConstant).ToList();
+            var constants = csv.Rows.Where(r => r.IsConstant).ToList();
+
             var folder = TagFolder(software, file, create: true);
             var table = folder.TagTables.Find(file.Name) ?? folder.TagTables.Create(file.Name);
 
-            var wanted = new HashSet<string>(rows.Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
+            // Deletions first, so a name can move between a tag and a constant.
+            var wanted = new HashSet<string>(tags.Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
             foreach (var stale in table.Tags.Cast<PlcTag>().Where(t => !wanted.Contains(t.Name)).ToList())
                 stale.Delete();
+            if (csv.HasConstants)
+            {
+                var wantedConstants = new HashSet<string>(constants.Select(r => r.Name), StringComparer.OrdinalIgnoreCase);
+                foreach (var stale in table.UserConstants.Cast<PlcUserConstant>().Where(c => !wantedConstants.Contains(c.Name)).ToList())
+                    stale.Delete();
+            }
 
-            foreach (var row in rows)
+            foreach (var row in constants)
+            {
+                var constant = table.UserConstants.Find(row.Name)
+                               ?? table.UserConstants.Create(row.Name, row.DataType, row.Value);
+                if (!string.IsNullOrEmpty(row.DataType) &&
+                    !string.Equals(constant.DataTypeName, row.DataType, StringComparison.OrdinalIgnoreCase))
+                    constant.DataTypeName = row.DataType;
+                if (!string.Equals(constant.Value, row.Value, StringComparison.Ordinal))
+                    constant.Value = row.Value;
+                SetComments(constant.Comment, language, languages, row);
+            }
+
+            foreach (var row in tags)
             {
                 var tag = table.Tags.Find(row.Name)
                           ?? (row.Address == null
@@ -481,7 +561,18 @@ namespace TiaCli.Openness
                 if (tag.ExternalVisible != row.HmiVisible) tag.ExternalVisible = row.HmiVisible;
                 if (tag.ExternalAccessible != row.HmiAccessible) tag.ExternalAccessible = row.HmiAccessible;
                 if (tag.ExternalWritable != row.HmiWriteable) tag.ExternalWritable = row.HmiWriteable;
-                SetEditingText(tag.Comment, language, row.Comment ?? "");
+                SetComments(tag.Comment, language, languages, row);
+            }
+        }
+
+        private static void SetComments(MultilingualText text, Language language,
+            Dictionary<string, Language> languages, TagRow row)
+        {
+            SetEditingText(text, language, row.Comment ?? "");
+            foreach (var pair in languages)
+            {
+                var value = row.Comments != null && row.Comments.TryGetValue(pair.Key, out var c) ? c : "";
+                SetText(text, pair.Value, value, row.Name);
             }
         }
 
@@ -582,7 +673,7 @@ namespace TiaCli.Openness
                 throw new SessionException(WireErrorCodes.InvalidRequest,
                     "An XML tag table names itself; --name does not apply to it.",
                     "Change the <Name> in the file to import it under another name.");
-            ApplyTagTable(software, file, EditingLanguage());
+            ApplyTagTable(software, file, EditingLanguage(), ProjectLanguage);
             return new SyncedFileDto { File = file.FullPath, Action = "imported" };
         }
 
@@ -700,6 +791,52 @@ namespace TiaCli.Openness
                     if (Equals(item.Language, language)) return NullIfEmpty(item.Text);
             }
             return FirstText(text);
+        }
+
+        /// <summary>
+        /// The comment in exactly <paramref name="language"/>, for a file that also carries the other
+        /// languages in columns of their own - falling back to another one would write it twice.
+        /// </summary>
+        private string CommentIn(MultilingualText text, Language language)
+        {
+            if (text == null) return null;
+            if (language == null) return EditingText(text);
+            foreach (MultilingualTextItem item in text.Items)
+                if (Equals(item.Language, language)) return NullIfEmpty(item.Text);
+            return null;
+        }
+
+        /// <summary>The comment in every language but <paramref name="language"/> that has one, by culture.</summary>
+        private static Dictionary<string, string> OtherComments(MultilingualText text, Language language)
+        {
+            if (text == null) return null;
+            var comments = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (MultilingualTextItem item in text.Items)
+                if (!Equals(item.Language, language) && !string.IsNullOrEmpty(item.Text))
+                    comments[item.Language.Culture.Name] = item.Text;
+            return comments.Count > 0 ? comments : null;
+        }
+
+        /// <summary>The project's language for a culture like de-DE, or null when it has none.</summary>
+        private Language ProjectLanguage(string culture)
+        {
+            foreach (Language language in RequireProject().LanguageSettings.ActiveLanguages)
+                if (string.Equals(language.Culture.Name, culture, StringComparison.OrdinalIgnoreCase)) return language;
+            return null;
+        }
+
+        private static void SetText(MultilingualText text, Language language, string value, string owner)
+        {
+            if (text == null) return;
+            foreach (MultilingualTextItem item in text.Items)
+            {
+                if (!Equals(item.Language, language)) continue;
+                if (!string.Equals(item.Text ?? "", value, StringComparison.Ordinal)) item.Text = value;
+                return;
+            }
+            throw new SessionException(WireErrorCodes.InvalidRequest,
+                $"'{owner}' has no comment in {language.Culture.Name} to set.",
+                "Check the language is active in TIA under Project languages.");
         }
 
         private static void SetEditingText(MultilingualText text, Language language, string value)
