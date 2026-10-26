@@ -34,6 +34,29 @@
 .PARAMETER PlcAddress
     IP address of a PLC to test against, e.g. 192.168.0.1. Without it the plc group is skipped.
 
+.PARAMETER PlcProject
+    The .ap20 the PLC at -PlcAddress actually runs. Going online needs it: against the throwaway
+    project the PLC's certificate does not match. Opened at the end of the run, never saved: in a
+    portal with a window to go online and offline, then headless, where going online must refuse a
+    protected CPU and - with -AllowPlcWrite - a download must take the login from -PlcUser. Close it
+    in TIA Portal first - a project open in one portal cannot be opened in another.
+
+.PARAMETER PlcStation
+    The station in -PlcProject to go online with, as 'tia devices' names it.
+
+.PARAMETER PlcTarget
+    The station's interface to go online through, such as "1 X1". Needed when it has several.
+
+.PARAMETER PlcUser
+    A user on the PLC to log in as, for the headless fingerprint read and (with -AllowPlcWrite)
+    the headless download. The run asks for its password - and with -AllowPlcWrite the project's
+    master secret - once at the start; both go to tia for this run only and are blanked out in
+    the report.
+
+.PARAMETER PlcUserType
+    What kind of user -PlcUser is: local, global, anonymous, password or sso. Passed as
+    --plc-user-type; without it tia picks one.
+
 .PARAMETER AllowPlcWrite
     Permit 'tia download', which stops and reloads the controller at -PlcAddress.
 
@@ -47,6 +70,7 @@
     powershell -ExecutionPolicy Bypass -File fieldtest.ps1
     powershell -ExecutionPolicy Bypass -File fieldtest.ps1 -PlcAddress 192.168.0.1
     powershell -ExecutionPolicy Bypass -File fieldtest.ps1 -PlcAddress 192.168.0.1 -AllowPlcWrite
+    powershell -ExecutionPolicy Bypass -File fieldtest.ps1 -PlcAddress 192.168.0.1 -PlcProject C:\p\Line.ap20 -PlcStation PLC_1 -PlcTarget "1 X1" -PlcUser operator
 #>
 
 [CmdletBinding()]
@@ -56,6 +80,11 @@ param(
     [string] $PlcAddress,
     [string] $ReportDir,
     [string] $OpennessVersion,
+    [string] $PlcProject,
+    [string] $PlcStation,
+    [string] $PlcTarget,
+    [string] $PlcUser,
+    [string] $PlcUserType,
     [switch] $AllowPlcWrite,
     [switch] $SkipUi,
     [switch] $KeepProject,
@@ -143,6 +172,13 @@ function Case {
 
     $started = Get-Date
 
+    # A password typed for this run must not end up in a report that gets sent around.
+    $shownArgs = @($TiaArgs)
+    foreach ($flag in '--plc-password', '--secret') {
+        $at = [Array]::IndexOf($shownArgs, $flag)
+        if ($at -ge 0 -and $at + 1 -lt $shownArgs.Count -and $shownArgs[$at + 1] -ne $Secret) { $shownArgs[$at + 1] = '***' }
+    }
+
     # Before the session exists, tia resolves Openness in its own process, so those commands need the
     # version as well. Once 'session start' has passed, the daemon has settled it and repeating the
     # flag only earns a warning.
@@ -181,7 +217,7 @@ function Case {
     }
 
     [void]$script:Results.Add([pscustomobject]@{
-        Name = $Name; Group = $Group; Command = $(if ($Stdin) { '(stdin) | ' }) + 'tia ' + ($TiaArgs -join ' ')
+        Name = $Name; Group = $Group; Command = $(if ($Stdin) { '(stdin) | ' }) + 'tia ' + ($shownArgs -join ' ')
         Expected = ($Expect -join ' or '); Exit = $code; Verdict = $verdict
         Seconds = $elapsed; Output = $output.TrimEnd(); Note = $Note
     })
@@ -225,6 +261,7 @@ try {
 
 $script:Env['plcAddress']    = if ($PlcAddress) { $PlcAddress } else { '(none given)' }
 $script:Env['allowPlcWrite'] = [bool]$AllowPlcWrite
+$script:Env['plcProject']    = if ($PlcProject) { "$PlcProject, station '$PlcStation'" + $(if ($PlcTarget) { " via $PlcTarget" }) + $(if ($PlcUser) { ", user $PlcUser" }) + $(if ($PlcUserType) { " ($PlcUserType)" }) } else { '(none given)' }
 
 foreach ($k in $script:Env.Keys) { Note ("{0,-14} {1}" -f $k, $script:Env[$k]) }
 
@@ -263,6 +300,29 @@ if ($AllowPlcWrite) {
         if (-not $plcWriteOk) { Write-Host '  Not confirmed - PLC write tests will be skipped.' -ForegroundColor Yellow }
     }
 }
+
+# ---------------------------------------------------------------- the PLC's own project
+if ($PlcProject) {
+    if (-not $PlcAddress -or -not $PlcStation) { throw '-PlcProject needs -PlcAddress and -PlcStation as well.' }
+    if (-not (Test-Path -LiteralPath $PlcProject)) { throw "-PlcProject not found: $PlcProject" }
+    $PlcProject = (Get-Item -LiteralPath $PlcProject).FullName
+} elseif ($PlcUser) {
+    throw '-PlcUser needs -PlcProject: the throwaway project cannot log in to your PLC.'
+}
+
+function Read-Secret ($prompt) {
+    $typed = Read-Host $prompt -AsSecureString
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($typed)
+    try { [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
+# Asked now rather than when they are needed, so the run can be left alone once it starts. The
+# login serves the fingerprint read and the download; the master secret only the download.
+$plcPassword = $null
+$plcSecret = $null
+if ($PlcProject -and $PlcUser) { $plcPassword = Read-Secret "  Password for PLC user '$PlcUser'" }
+if ($PlcProject -and $plcWriteOk) { $plcSecret = Read-Secret '  Master secret of the PLC project (Enter if it has none)' }
 
 # ---------------------------------------------------------------- session
 Head 'Session'
@@ -534,10 +594,16 @@ END_TYPE
     # on any machine, and creates nothing.
     Case -Name 'sim create refuses an S7-1200' -Group core -TiaArgs @('sim', 'create', 'PLC_1') -Expect @(2)
 
+    # Nothing is online yet, so this only proves the verb reaches the device's online service.
+    Case -Name 'offline when not online' -Group core -TiaArgs @('offline', 'PLC_1')
+
     if ($script:Env['plcsim'] -eq 'present') {
         Note 'Both need a simulation already running at 192.168.0.10: TIA will not start one for a download.'
         Case -Name 'download to PLCSIM' -Group plcsim -TiaArgs @('download', 'PLC_1', '--hardware', '--interface', 'PLCSIM', '--secret', $Secret) `
             -Note 'The route that works today. Fails with exit 5 and a list of interfaces when no simulation is running.'
+        Case -Name 'online to PLCSIM' -Group plcsim -TiaArgs @('online', 'PLC_1', '--interface', 'PLCSIM') `
+            -Note 'Should print Online (was Offline). NotReachable means no simulation answered.'
+        Case -Name 'offline from PLCSIM' -Group plcsim -TiaArgs @('offline', 'PLC_1')
         Case -Name 'sim start' -Group plcsim -TiaArgs @('sim', 'start', 'PLC_1', '--secret', $Secret) `
             -Note 'In development and documented as not working yet; a failure here is known.'
     } else {
@@ -556,6 +622,15 @@ END_TYPE
         Note "ping $PlcAddress : $(if ($reachable) { 'reachable' } else { 'NO REPLY' })"
 
         Case -Name 'upload station' -Group plc -TiaArgs @('upload', $PlcAddress)
+
+        # Read-only: going online changes nothing on the controller, so no -AllowPlcWrite.
+        if ($PlcProject) {
+            Skip -Name 'online to PLC' -Group plc -Why 'runs on -PlcProject at the end instead; this project is not the one on the PLC'
+        } else {
+            Case -Name 'online to PLC' -Group plc -TiaArgs @('online', 'PLC_1', '--address', $PlcAddress) `
+                -Note 'Online, or Protected/Incompatible with a hint when the PLC is not the one in the project.'
+            Case -Name 'offline from PLC' -Group plc -TiaArgs @('offline', 'PLC_1')
+        }
 
         if ($plcWriteOk) {
             Case -Name 'download to PLC' -Group plc -TiaArgs @('download', 'PLC_1', '--address', $PlcAddress, '--secret', $Secret)
@@ -726,6 +801,78 @@ END_TYPE
     } else {
         Skip -Name 'init --from an archive' -Group core -Why 'no archive was made earlier in the run'
     }
+
+    # ------------------------------------------------------------ the PLC's own project
+    Head "Online with the PLC's own project"
+
+    # Last, and with every other session stopped first, so plain commands reach this one. Nothing is
+    # saved: 'session stop' closes the portal tia started, and whatever going online changed in the
+    # project goes with it. What V20 showed: going online to a protected PLC asks the login in TIA's
+    # own window only, while a download takes it from tia - headless as well.
+    if (-not $PlcProject) {
+        Skip -Name 'online with the PLC project' -Group plc -Why 'no -PlcProject given'
+    } else {
+        $route = @('--address', $PlcAddress)
+        if ($PlcTarget) { $route += @('--target', $PlcTarget) }
+        Case -Name 'session stop before the PLC project' -Group plc -TiaArgs @('session', 'stop', '--all')
+
+        if ($SkipUi) {
+            Skip -Name 'online with the PLC project' -Group plc -Why '-SkipUi: the login for going online needs a window'
+        } else {
+            Case -Name 'session start on the PLC project' -Group plc -TiaArgs @('session', 'start', '--new', '--project', $PlcProject)
+            if ($script:LastPassed) {
+                Write-Host ''
+                Write-Host '  If TIA Portal shows an "Authorized connection" window now, log in there.' -ForegroundColor Yellow
+                Case -Name 'online to the PLC project' -Group plc -TiaArgs (@('online', $PlcStation) + $route) -Expect @(0, 7) `
+                    -Note 'Online, or exit 7 for a certificate refusal. A protected PLC shows TIA''s login window first.'
+
+                # The PLC's certificate is accepted for this portal only, as TIA's Connect button does.
+                if ($script:Results[$script:Results.Count - 1].Output -match 'certificate') {
+                    Case -Name 'online accepting the certificate' -Group plc -TiaArgs (@('online', $PlcStation) + $route + @('--force'))
+                }
+
+                if ($script:Results[$script:Results.Count - 1].Exit -eq 0) {
+                    Case -Name 'online again: already' -Group plc -TiaArgs @('online', $PlcStation) -Note 'Should print (already).'
+                    Case -Name 'offline from the PLC project' -Group plc -TiaArgs @('offline', $PlcStation)
+                    # TIA keeps the login for the portal's life, so this should not ask again.
+                    Case -Name 'online again on the kept connection' -Group plc -TiaArgs @('online', $PlcStation) `
+                        -Note 'Should print Online (was Offline), with no login window.'
+                }
+                Case -Name 'offline at the end' -Group plc -TiaArgs @('offline', $PlcStation)
+            }
+            Case -Name 'session stop on the PLC project' -Group plc -TiaArgs @('session', 'stop')
+        }
+
+        # Headless: going online must refuse a protected CPU rather than let TIA die on its login
+        # window, and a download must take the login from the command line.
+        Case -Name 'headless session on the PLC project' -Group plc -TiaArgs @('session', 'start', '--new', '--headless', '--project', $PlcProject)
+        if ($script:LastPassed) {
+            Case -Name 'headless online refuses a protected CPU' -Group plc -TiaArgs (@('online', $PlcStation) + $route) -Expect @(0, 2) `
+                -Note 'Exit 2 with the reason for a protected CPU; 0 for an open one. Never a dead portal (exit 9).'
+            if ($script:Results[$script:Results.Count - 1].Exit -eq 0) {
+                Case -Name 'headless offline' -Group plc -TiaArgs @('offline', $PlcStation)
+            }
+
+            # Read-only, and takes the login itself the way a download does - so headless is fine.
+            $fingerprintLogin = @()
+            if ($PlcUser) { $fingerprintLogin += @('--plc-user', $PlcUser, '--plc-password', $plcPassword) }
+            if ($PlcUserType) { $fingerprintLogin += @('--plc-user-type', $PlcUserType) }
+            Case -Name 'headless fingerprint' -Group plc -TiaArgs (@('fingerprint', $PlcStation, '--address', $PlcAddress) + $fingerprintLogin) -Expect @(0, 7) `
+                -Note 'The PLC''s fingerprints without going online. Exit 7 names a missing login or certificate.'
+
+            if (-not $plcWriteOk) {
+                Skip -Name 'headless download with a login' -Group plc -Why 'needs -AllowPlcWrite and confirmation; it stops and reloads the controller'
+            } else {
+                $login = @()
+                if ($PlcUser)     { $login += @('--plc-user', $PlcUser, '--plc-password', $plcPassword) }
+                if ($PlcUserType) { $login += @('--plc-user-type', $PlcUserType) }
+                if ($plcSecret)   { $login += @('--secret', $plcSecret) }
+                Case -Name 'headless download with a login' -Group plc -TiaArgs (@('download', $PlcStation) + $route + $login) `
+                    -Note 'Software only. A refusal names what is missing: the login, the master secret or the certificate.'
+            }
+        }
+        Case -Name 'session stop on the headless PLC project' -Group plc -TiaArgs @('session', 'stop')
+    }
     } # end of the "session started" branch
 
 } catch {
@@ -804,11 +951,18 @@ END_TYPE
     [pscustomobject]@{ environment = $script:Env; results = $script:Results } |
         ConvertTo-Json -Depth 6 | Set-Content -Path $json -Encoding utf8
 
+    # What TIA asked during transfers and going online is only in the daemon's log. Passwords are
+    # never written there, so it travels with the report.
+    $daemonLog = Join-Path $env:LOCALAPPDATA 'tia-cli\daemon.log'
+    $log = Join-Path $ReportDir "fieldtest-$stamp-daemon.log"
+    if (Test-Path -LiteralPath $daemonLog) { Copy-Item -LiteralPath $daemonLog -Destination $log } else { $log = $null }
+
     Write-Host ''
     Write-Host "$pass passed, $fail failed, $skip skipped" -ForegroundColor $(if ($fail) { 'Red' } else { 'Green' })
     Write-Host ''
-    Write-Host 'Send these two files back:'
+    Write-Host 'Send these files back:'
     Write-Host "  $md"
     Write-Host "  $json"
+    if ($log) { Write-Host "  $log" }
     Write-Host ''
 }

@@ -111,6 +111,10 @@ namespace TiaCli.Cli
                     target = cmd.Value("target"),
                     secret = cmd.Value("secret"),
                     plcPassword = cmd.Value("plc-password"),
+                    plcUser = cmd.Value("plc-user"),
+                    plcUserType = cmd.Value("plc-user-type"),
+                    acceptCertificate = cmd.Has("accept-certificate"),
+                    trustCertificate = cmd.Has("trust-certificate"),
                 });
                 case "upload": return Transfer(cmd, executor, output, "plc.upload", new
                 {
@@ -118,6 +122,11 @@ namespace TiaCli.Cli
                     mode = cmd.Value("via"),
                     pcInterface = cmd.Value("interface"),
                     slot = cmd.Int("slot", 1),
+                    plcPassword = cmd.Value("plc-password"),
+                    plcUser = cmd.Value("plc-user"),
+                    plcUserType = cmd.Value("plc-user-type"),
+                    acceptCertificate = cmd.Has("accept-certificate"),
+                    trustCertificate = cmd.Has("trust-certificate"),
                 });
                 case "sim start": return Transfer(cmd, executor, output, "sim.start", new
                 {
@@ -130,6 +139,40 @@ namespace TiaCli.Cli
                     advanced = cmd.Has("advanced"),
                     target = cmd.Value("target"),
                     secret = cmd.Value("secret"),
+                    plcPassword = cmd.Value("plc-password"),
+                    plcUser = cmd.Value("plc-user"),
+                    plcUserType = cmd.Value("plc-user-type"),
+                });
+                case "online": return Online(executor, output, "plc.goOnline", new
+                {
+                    device = cmd.Positional(0, "station"),
+                    mode = cmd.Value("via"),
+                    pcInterface = cmd.Value("interface"),
+                    slot = cmd.Int("slot", 1),
+                    address = cmd.Value("address"),
+                    target = cmd.Value("target"),
+                    force = cmd.Has("force"),
+                    acceptCertificate = cmd.Has("accept-certificate"),
+                    trustCertificate = cmd.Has("trust-certificate"),
+                    plcUser = cmd.Value("plc-user"),
+                    plcUserType = cmd.Value("plc-user-type"),
+                    plcPassword = cmd.Value("plc-password"),
+                });
+                case "offline": return Online(executor, output, "plc.goOffline", new
+                {
+                    device = cmd.Positional(0, "station"),
+                });
+                case "fingerprint": return Fingerprint(executor, output, new
+                {
+                    device = cmd.Positional(0, "station"),
+                    mode = cmd.Value("via"),
+                    pcInterface = cmd.Value("interface"),
+                    slot = cmd.Int("slot", 1),
+                    address = cmd.Value("address"),
+                    acceptCertificate = cmd.Has("accept-certificate"),
+                    trustCertificate = cmd.Has("trust-certificate"),
+                    plcUser = cmd.Value("plc-user"),
+                    plcUserType = cmd.Value("plc-user-type"),
                     plcPassword = cmd.Value("plc-password"),
                 });
 
@@ -229,6 +272,50 @@ namespace TiaCli.Cli
                 output.Detail($"...and {interesting.Count - cap} more. Use --json for all of them.");
 
             return transfer.ErrorCount > 0 ? 1 : 0;
+        }
+
+        /// <summary>Going online or offline. Exits non-zero unless the device ended in the state asked for.</summary>
+        private static int Online(IExecutor executor, Output output, string method, object parameters)
+        {
+            var result = Call(executor, method, parameters);
+            var online = JsonUtil.To<OnlineResultDto>(result);
+            var wanted = online.Operation == "online" ? "Online" : "Offline";
+            var code = online.State == wanted ? 0 : 1;
+
+            if (output.AsJson) { output.Json(result); return code; }
+
+            output.Line(online.State == online.Previous
+                ? $"{online.Device}: {online.State} (already)"
+                : $"{online.Device}: {online.State} (was {online.Previous})");
+            if (online.Operation == "online" && online.Previous != online.State)
+                output.Pairs(new[]
+                {
+                    Output.KV("target", online.TargetAddress ?? "as configured"),
+                    Output.KV("via", online.Mode == null ? "as configured" : online.Mode + " / " + online.PcInterface),
+                });
+
+            foreach (var decision in online.Decisions ?? new List<string>())
+                output.Detail("answered: " + decision);
+            if (!string.IsNullOrEmpty(online.Hint)) output.Line(online.Hint);
+            return code;
+        }
+
+        private static int Fingerprint(IExecutor executor, Output output, object parameters)
+        {
+            var result = Call(executor, "plc.fingerprint", parameters);
+            if (output.AsJson) { output.Json(result); return 0; }
+
+            var fingerprint = JsonUtil.To<FingerprintResultDto>(result);
+            output.Pairs(new[]
+            {
+                Output.KV("target", fingerprint.TargetAddress),
+                Output.KV("via", fingerprint.Mode + " / " + fingerprint.PcInterface),
+            });
+            foreach (var decision in fingerprint.Decisions ?? new List<string>())
+                output.Detail("answered: " + decision);
+            output.Table(new[] { "identifier", "value" },
+                (fingerprint.Items ?? new List<FingerprintItemDto>()).Select(i => new[] { i.Identifier, i.Value }).ToList());
+            return 0;
         }
 
         // ---------------------------------------------------------------- project

@@ -16,12 +16,58 @@ that do not match cannot be watched online or snapshotted. VCI shows this today.
   taken before (`PlcSoftware.CompareTo`). Same for a DB where only a start value changed. If the
   interface timestamp survives, syncing only what changed is safe.
 - **`tia compare`:** `PlcSoftware.CompareToOnline()` (offline vs PLC), `PlcSoftware.CompareTo` and
-  `Device.CompareTo` (project vs project, offline). Read-only.
+  `Device.CompareTo` (project vs project, offline). Read-only. `tia online <station>` exists now
+  for the PLC side, if `CompareToOnline` turns out to need an open connection.
 - `tia download` already refuses the `DataBlockReinitialization` prompt unless `--force`.
 - Actual values: Openness can only export a snapshot taken in TIA (`InterfaceSnapshot`), not take
   one. The plan is to avoid mismatches rather than rescue values after them.
 - Principle: the downloaded project (`.tia/archive/`, `.tia/project/`) carries TIA's identities; `source/`
   is its reviewable view. Changes are applied in place; rebuilding is for CI and recovery.
+
+## Parked (2026-10-26): logging in when going online to a protected PLC
+
+Tested on the work machine against PLCSIM Advanced (S7-1500, user management, TIA V20).
+
+**Works:**
+- `tia download` / `upload` answer the PLC's certificate and login themselves (`--plc-user`,
+  `--plc-password`, `--plc-user-type`, `--accept-certificate`, `--trust-certificate`) — headless too.
+  TIA asks these on the transfer's `ConnectionConfiguration.OnlineLegitimation`, as
+  `TlsVerificationConfiguration` and `OnlineAuthenticationConfiguration` (TIA's "Local user" is
+  `UserType.ProjectUser`). Before this fix download never listened, and every download to a PLC with a
+  certificate failed with nothing but "Connect to module failed".
+- `tia online` / `offline` in a portal with a window. The certificate goes through tia
+  (`--force`/`--accept-certificate` = TIA's Connect button, which is `NonVerified`); the login is
+  typed into TIA's own window by the user, once per portal.
+- Headless, `tia online` refuses a CPU the project marks as protected (access control on, or a
+  restricted access level) instead of letting TIA die trying to show its login window.
+
+**Does not work yet, and why:**
+- **Login for `GoOnline()`.** V20 never puts it to Openness: not on the online connection (the
+  certificate does arrive there), not on the download's connection (TIA refuses a listener there
+  outside a download), not as a portal Confirmation or Notification, not on an MTA thread. TIA shows
+  its "Authorized connection" window; headless it crashes the portal. Openness gap, not a tia bug.
+- **Filling that window by UI Automation** (`LoginWindowFiller`). Works against a stand-in dialog.
+  Against TIA it never matched: the window *is* in the portal's process, but UI Automation names it
+  with a resource key, not the visible title — `DialogFrameControl_Siemens.Automation.DomainServices.UI:
+  Siemens.Automation.DomainServices.UI.OnlineService.LegitimationDialogResources:
+  HeadingLegitimationEnterPasswordHeader` (WinForms, class `WindowsForms10.Window.8.app…`). The filler
+  now matches `LegitimationDialog` and falls back to field order (user name, password) when the
+  password field is not marked as one — **untested against TIA**. Its log lines (`window seen`,
+  `login window fields`) show what it finds.
+- **`tia fingerprint`** (`FingerprintDataProvider`, from the portal). Reaches the PLC, then hangs
+  headless with no prompt reaching tia — probably the same login, asked where tia cannot answer.
+
+**Next, in order:**
+1. Run `tia online --plc-user … --plc-password …` once with the `LegitimationDialog` match and read
+   the `login window fields` line: whether the user type, user name and password fields are
+   reachable through UI Automation decides whether the filler can work at all.
+2. Try V21 Openness (installed on the work machine): `OnlineProvider.GoOnline(ConfigurationAddress)`
+   and V21's prompts may route the online login like download's.
+3. Ask Siemens how Openness supplies the login for `GoOnline` on V20.
+4. Fallback that needs no online login: anonymous access with HMI/diagnostics rights in the PLC's
+   user management — a PLC-side choice for the user.
+5. Separately: download answers user management with "keep what is on the PLC"; TIA's own default is
+   "download all". Decide which tia should follow and offer the other as an option.
 
 ## 1. Workspaces — in progress
 

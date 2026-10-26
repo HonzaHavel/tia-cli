@@ -354,8 +354,11 @@ Run `tia help` for the full text.
 | `tia types export [<station>]` / `types import` | Every data type, out (`--out <dir>`) or in (`--from <dir>`). Default `<station>/PLC data types/` |
 | `tia type import <station> <file.udt>` | Generate the data type(s) in a `.udt` file (`--folder`) |
 | `tia compile <station>` | Compile. Exits non-zero when it reports errors. |
-| `tia download <station>` | Download to the PLC (`--address`, `--via`, `--interface`, `--target`, `--slot`, `--hardware`, `--changes`, `--stopped`, `--force`, `--secret`, `--plc-password`) |
-| `tia upload <ip>` | Upload the station at that address into the project as a new station (`--via`, `--interface`, `--slot`) |
+| `tia download <station>` | Download to the PLC (`--address`, `--via`, `--interface`, `--target`, `--slot`, `--hardware`, `--changes`, `--stopped`, `--force`, `--secret`, `--plc-password`, `--plc-user`, `--plc-user-type`, `--accept-certificate`, `--trust-certificate`) |
+| `tia upload <ip>` | Upload the station at that address into the project as a new station (`--via`, `--interface`, `--slot`, and the login and certificate options) |
+| `tia online <station>` | Go online with the PLC and print the state (route options as for `download`; `--force` accepts an unverified certificate). A protected PLC's login comes up in TIA's own window, so this needs a portal with a window; headless it refuses a protected CPU |
+| `tia offline <station>` | Go offline from the PLC |
+| `tia fingerprint <station>` | **In development.** Read the PLC's fingerprints without going online (route, login and certificate options). Hangs headless on V20 |
 | `tia sim create <station>` | **In development.** Creates a PLCSIM instance and powers it on (`--cpu`, `--address`, `--mask`, `--timeout <seconds>`). S7-1500 and up only, and TIA will not download to the instance it makes — see below |
 | `tia sim start <station>` | **In development, and does not currently work as expected.** Meant to be the download to S7-PLCSIM (`--advanced` for PLCSIM Advanced; `--address`, `--interface`, `--slot`, `--hardware`, `--stopped`, `--target`, `--secret`, `--plc-password` as for `download`). Start the simulation from TIA and use `tia download <station> --interface PLCSIM` instead |
 | `tia show hw` | Open the hardware editor (`--view device\|network\|topology`) |
@@ -454,6 +457,13 @@ tia compile PLC_1 || echo "compile failed"
   is remembered anywhere, and without them the prompt aborts by name as before — a CLI has no
   business holding PLC passwords of its own accord. An unrecognised prompt aborts by name so it can be
   added deliberately rather than answered by accident.
+- **The PLC asks before the dialog does.** A current S7-1500 asks about its certificate, and with
+  user management for a login, on the connection rather than as a download prompt. Unheard, TIA drops
+  the connection and says only "Connect to module failed". tia listens there for download, upload and
+  going online: an unverifiable certificate is refused by name unless `--accept-certificate` or
+  `--trust-certificate`, and the login comes from `--plc-user` / `--plc-password`. Going online is
+  the exception: on V20 TIA asks that login only in its own window, never through Openness, so it
+  needs a portal with a window and someone to log in there once.
 - **There is no "start simulation" call in Openness.** What exists is downloading to a simulator, and
   `tia sim start` is that download. Up to V17 it goes to the `PLCSIM` connection mode, which also
   boots the simulator. From V18 that mode is gone: a simulated PLC is an ordinary PN/IE target behind

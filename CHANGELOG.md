@@ -3,6 +3,41 @@
 Notable changes to tia-cli. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+**Going online and offline: `tia online` and `tia offline`.** The route is picked as for a
+download - `--address`, `--via`, `--interface`, `--slot`, `--target` - and with none given the
+connection already configured is reused. Both print the state TIA reports (Online, NotReachable,
+Protected, Incompatible) and what it was before, and exit non-zero unless they end in the state
+asked for.
+
+- A PLC that wants a login asks for it in TIA's own window when going online: Openness on V20 hands
+  that one question to no tool. Log in there, once per portal. With `--plc-user` and
+  `--plc-password`, tia tries to fill that window itself - not yet working against TIA, see the
+  roadmap.
+- In a `--headless` session, `tia online` refuses a CPU the project marks as protected, where TIA
+  would otherwise die trying to show its login window.
+
+**The PLC's certificate and login, for download and upload.** A PLC with a certificate - every
+current S7-1500, PLCSIM Advanced included - asks about it before any transfer starts, and tia never
+listened, so those downloads failed with nothing but "Connect to module failed". Now:
+
+- A certificate that cannot be verified (fresh, self-signed, or not the project's) is refused by
+  name unless `--accept-certificate` (connect once, like TIA's Connect button) or
+  `--trust-certificate`. `tia online --force` means the same as `--accept-certificate`.
+- A PLC with user management takes `--plc-user` and `--plc-password` on `download` and `upload`,
+  headless too; `--plc-user-type` picks local (TIA's "Local user", the default with a user name),
+  global, anonymous, password or sso.
+
+**`tia fingerprint <station>`** reads the PLC's fingerprints without going online. Read-only. It
+reaches the PLC, then hangs headless on V20 - see the roadmap.
+
+### Fixed
+
+- Downloads and uploads to a PLC with a certificate no longer fail with "Connect to module failed".
+
 ## 0.4.2 — 2026-10-21
 
 ### Added

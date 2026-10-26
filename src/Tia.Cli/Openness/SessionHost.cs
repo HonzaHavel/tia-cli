@@ -262,6 +262,11 @@ namespace TiaCli.Openness
                 case "plc.upload": return _session.UploadStation(ReadPlan(p));
                 case "sim.start": return _session.StartSimulation(
                     p.RequiredString("device"), ReadPlan(p));
+                case "plc.goOnline": return _session.GoOnline(
+                    p.RequiredString("device"), ReadPlan(p));
+                case "plc.goOffline": return _session.GoOffline(p.RequiredString("device"));
+                case "plc.fingerprint": return _session.ReadFingerprints(
+                    p.RequiredString("device"), ReadPlan(p));
 
                 default:
                     throw new SessionException(WireErrorCodes.InvalidRequest,
@@ -272,16 +277,20 @@ namespace TiaCli.Openness
         private static TiaSession.TransferPlan ReadPlan(Params p)
         {
             var plan = new TiaSession.TransferPlan();
-            if (p.String("mode") != null) plan.Mode = p.String("mode");
+            plan.Mode = p.String("mode");
             plan.PcInterface = p.String("pcInterface");
             plan.InterfaceNumber = p.Int("slot", 1);
             plan.Address = p.String("address");
             plan.TargetInterface = p.String("target");
             plan.MasterSecret = p.String("secret");
             plan.PlcPassword = p.String("plcPassword");
+            plan.PlcUser = p.String("plcUser");
+            plan.PlcUserType = p.String("plcUserType");
             plan.IncludeHardware = p.Bool("hardware", false);
             plan.OnlyChanges = p.Bool("onlyChanges", false);
             plan.Force = p.Bool("force", false);
+            plan.AcceptCertificate = p.Bool("acceptCertificate", false);
+            plan.TrustCertificate = p.Bool("trustCertificate", false);
             plan.NoStart = p.Bool("noStart", false);
             plan.SimulationAdvancedTarget = p.Bool("advanced", false);
             return plan;

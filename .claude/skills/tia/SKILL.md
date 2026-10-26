@@ -193,13 +193,32 @@ Other options: `--via <mode>` (default PN/IE), `--interface <PC adapter>` and `-
 PC has several, `--target <device interface>` (e.g. `"1 X1"`), `--stopped` leaves the CPU in STOP.
 A wrong `--interface` or `--target` fails with a list of what exists — use that list.
 
+A PLC whose certificate cannot be verified (fresh, self-signed, or not the project's) fails with a
+message naming the certificate; `--accept-certificate` connects once, like TIA's Connect button, and
+`--trust-certificate` marks it trusted — ask the user first. Both work on `upload` and `online` too.
+
+A PLC with user management fails with "The PLC wants a login (it takes: ProjectUser)". Ask the user
+for it and pass `--plc-user <name> --plc-password <pw>` (TIA's "Local user" is `--plc-user-type
+local`, the default with a user name). This works headless.
+
 Routine prompts are answered like the dialog's defaults and listed in the output. Destructive ones
 (reset module, reinitialise DBs, firmware change, protection change) abort by name unless `--force`
 — report the name to the user and let them decide. A password prompt aborts unless the user gave
-`--secret` (master secret) or `--plc-password` (access level) for this run.
+`--secret` (master secret) or `--plc-password` (access level or login) for this run.
+
+`tia online <dev>` goes online with the PLC and prints the state (Online, NotReachable, Protected,
+Incompatible), exiting non-zero unless it ends Online; `tia offline <dev>` goes back. It takes the
+download's route options and certificate flags (`--force` = `--accept-certificate` here); with no
+route, it reuses the connection already configured. Going online changes nothing on the PLC. A
+protected PLC's login for going online comes up in TIA's own window only: with `--plc-user` and
+`--plc-password`, tia fills that window in; without them the user logs in there, once per portal.
+So `tia online` needs a portal with a window and refuses a protected CPU in a `--headless` session.
+
+`tia fingerprint <dev>` reads the PLC's fingerprints without going online — read-only, takes the
+login and certificate flags like download, and works headless.
 
 `tia upload <ip>` reads the station at that address into the project as a new station
-(`--via`, `--interface`, `--slot`).
+(`--via`, `--interface`, `--slot`, and the login and certificate flags).
 
 **Simulation.** Start the simulation from TIA or the PLCSIM window, then
 `tia download <dev> --interface PLCSIM`. The dedicated verbs are in development:

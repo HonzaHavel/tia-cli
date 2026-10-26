@@ -205,11 +205,39 @@ PLC (online)
                                                    [--interface <name>] [--slot <n>] [--hardware]
                                                    [--changes] [--stopped] [--force] [--target <name>]
                                                    [--secret <master secret>] [--plc-password <pw>]
+                                                   [--plc-user <name>] [--plc-user-type <type>]
+                                                   [--accept-certificate] [--trust-certificate]
                            Routine prompts are answered like the dialog's defaults; destructive
                            ones (reset, reinitialize, up/downgrade) abort unless --force.
-                           Password-protected targets are refused - use the TIA Portal UI.
+  online <station>         Go online with the PLC  [--address <ip>] [--via <mode>] [--interface <name>]
+                                                   [--slot <n>] [--target <name>] [--force]
+                                                   [--plc-user <name>] [--plc-password <pw>]
+                                                   [--plc-user-type <type>]
+                                                   [--accept-certificate] [--trust-certificate]
+                           With no route given, reuses the connection already configured.
+                           Prints the state; exits non-zero unless it ends Online. --force here
+                           only means --accept-certificate: going online changes nothing.
+                           A protected PLC's login comes up in TIA's own window: with --plc-user
+                           and --plc-password, tia fills it in; without, log in there yourself.
+                           Refused in a --headless session, which has no window to log in through.
+  offline <station>        Go offline from the PLC
+  fingerprint <station>    Read the PLC's fingerprints without going online: what changes when its
+                           contents change. Read-only; takes the login headless.
+                                                   [--address <ip>] [--via <mode>] [--interface <name>]
+                                                   [--slot <n>] [--plc-user <name>] [--plc-password <pw>]
+                                                   [--plc-user-type <type>]
+                                                   [--accept-certificate] [--trust-certificate]
   upload <ip>              Upload the station at <ip> into the project as a new station
                                                    [--via <mode>] [--interface <name>] [--slot <n>]
+                                                   [--plc-user <name>] [--plc-password <pw>]
+                                                   [--plc-user-type <type>]
+                                                   [--accept-certificate] [--trust-certificate]
+
+                           Login (download, upload): --plc-user and --plc-password, headless too.
+                           User types: local (TIA's 'Local user'), global, anonymous, password, sso.
+                           Certificate: one that cannot be verified (fresh, self-signed, or not the
+                           project's) is refused unless --accept-certificate (connect once, like
+                           TIA's 'Connect' button) or --trust-certificate (mark it trusted).
   sim create <station>     Create a PLCSIM instance for the device and power it on
                                                    [--cpu <type>] [--address <ip>] [--mask <netmask>]
                                                    [--timeout <seconds>, default 60]

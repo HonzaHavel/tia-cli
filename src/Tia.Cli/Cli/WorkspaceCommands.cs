@@ -40,7 +40,7 @@ namespace TiaCli.Cli
         private static readonly Dictionary<string, int> StationArguments = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             { "export", 1 }, { "sync", 1 }, { "blocks", 1 }, { "sources", 1 }, { "tables", 1 }, { "tags", 1 }, { "compile", 1 },
-            { "download", 1 }, { "sim create", 1 }, { "sim start", 1 }, { "show device", 1 },
+            { "download", 1 }, { "online", 1 }, { "offline", 1 }, { "fingerprint", 1 }, { "sim create", 1 }, { "sim start", 1 }, { "show device", 1 },
             { "device attrs", 1 }, { "device protection", 1 }, { "device ip", 1 },
             { "block show", 2 }, { "block source", 2 }, { "block export", 2 }, { "block import", 2 },
             { "block delete", 2 }, { "folder add", 2 }, { "folder delete", 2 }, { "source add", 2 },

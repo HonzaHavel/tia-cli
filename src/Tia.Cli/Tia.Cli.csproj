@@ -18,6 +18,13 @@
     <InternalsVisibleTo Include="Tia.Cli.Tests" />
   </ItemGroup>
 
+  <!-- Windows UI Automation, part of .NET Framework: fills TIA's login window for 'tia online'. -->
+  <ItemGroup>
+    <Reference Include="UIAutomationClient" />
+    <Reference Include="UIAutomationTypes" />
+    <Reference Include="System.Windows.Forms" />
+  </ItemGroup>
+
   <!--
     Compile-time reference only: <Private>false</Private> keeps the DLL out of the output. At runtime
     OpennessResolver finds it through the registry, which is what lets one build drive whichever TIA

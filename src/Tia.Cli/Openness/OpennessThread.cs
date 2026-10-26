@@ -28,6 +28,8 @@ namespace TiaCli.Openness
                 IsBackground = true,
             };
             // Openness hosts WPF dialogs (UMAC login, upgrade prompts) when started with a UI.
+            // (Tried MTA on V20 to see whether the online login would then reach OnlineLegitimation:
+            // it does not - that window is TIA's own, in its own process.)
             _thread.SetApartmentState(ApartmentState.STA);
             _thread.Start();
         }

@@ -12,12 +12,14 @@ using Siemens.Engineering.Download.Configurations;
 using Siemens.Engineering.HW;
 using Siemens.Engineering.HW.Features;
 using Siemens.Engineering.HW.HardwareCatalog;
+using Siemens.Engineering.Online;
 using Siemens.Engineering.SW;
 using Siemens.Engineering.SW.Blocks;
 using Siemens.Engineering.SW.ExternalSources;
 using Siemens.Engineering.SW.Tags;
 using Siemens.Engineering.Upload;
 using TiaCli.Protocol;
+using OnlinePrompts = Siemens.Engineering.Online.Configurations;
 
 namespace TiaCli.Openness
 {
@@ -716,7 +718,8 @@ namespace TiaCli.Openness
         /// <summary>Everything that describes one transfer to or from a PLC.</summary>
         internal sealed class TransferPlan
         {
-            public string Mode = "PN/IE";
+            /// <summary>The connection mode; null means PN/IE, or the configured one when going online.</summary>
+            public string Mode;
             public string PcInterface;
             public int InterfaceNumber = 1;
             public string Address;
@@ -726,10 +729,18 @@ namespace TiaCli.Openness
             public string MasterSecret;
             /// <summary>Answers the access-level prompts. Given only when the caller insists.</summary>
             public string PlcPassword;
+            /// <summary>Going online to a CPU with user management: who to log in as, with PlcPassword.</summary>
+            public string PlcUser;
+            /// <summary>Which kind of user PlcUser is: local, global, anonymous, password or sso.</summary>
+            public string PlcUserType;
             public bool IncludeHardware;
             public bool OnlyChanges;
             /// <summary>Allow the prompts that change or erase things beyond the download itself.</summary>
             public bool Force;
+            /// <summary>Connect to a PLC whose certificate cannot be verified, as TIA's "Connect" button does.</summary>
+            public bool AcceptCertificate;
+            /// <summary>Answer the certificate as verified and trusted instead of connecting once.</summary>
+            public bool TrustCertificate;
             /// <summary>Leave the CPU stopped when the download is done.</summary>
             public bool NoStart;
             /// <summary>Answer the software-target prompt with PLCSIM Advanced instead of a CPU.</summary>
@@ -750,13 +761,17 @@ namespace TiaCli.Openness
                 throw new SessionException(WireErrorCodes.OpennessError,
                     $"'{deviceName}' has no download service - it cannot be a download target.");
 
-            var target = ResolveTarget(provider.Configuration, plan, DeviceAddressFallback(deviceName), forDownload: true);
+            var target = ResolveTarget(provider.Configuration, plan, DeviceAddressFallback(deviceName), toDevice: true);
 
             var options = plan.OnlyChanges ? DownloadOptions.SoftwareOnlyChanges : DownloadOptions.Software;
             if (plan.IncludeHardware) options |= DownloadOptions.Hardware;
 
             var decisions = new List<string>();
             var refusals = new List<SessionException>();
+            // The PLC's certificate and login are asked on the connection, not as download prompts.
+            // Unheard, TIA gives up on them and reports only "Connect to module failed".
+            var connection = provider.Configuration;
+            var hooked = HookOnlinePrompts(connection, "download", plan, decisions, refusals);
             // Nothing may escape this delegate: TIA runs it inside Download, and an exception there -
             // even one raised by an assignment TIA itself rejects - takes the portal down unexplained.
             // Every prompt is logged, so a crash leaves a trail of how far the download got.
@@ -831,6 +846,10 @@ namespace TiaCli.Openness
                         ? reasons + Environment.NewLine + "Fix these, then run 'tia compile " + deviceName + "' and download again."
                         : "The project compiles, so check that the target is reachable: is the PLC (or the PLCSIM instance) running at that address, on a subnet of its own?");
             }
+            finally
+            {
+                UnhookOnlinePrompts(connection, hooked);
+            }
         }
 
         /// <summary>
@@ -851,10 +870,12 @@ namespace TiaCli.Openness
                 throw new SessionException(WireErrorCodes.InvalidRequest,
                     "Uploading needs the PLC's address.", "Give it as 'tia upload <ip>'.");
 
-            var target = ResolveTarget(provider.Configuration, plan, null, forDownload: false);
+            var target = ResolveTarget(provider.Configuration, plan, null, toDevice: false);
 
             var decisions = new List<string>();
             var refusals = new List<SessionException>();
+            var connection = provider.Configuration;
+            var hooked = HookOnlinePrompts(connection, "upload", plan, decisions, refusals);
 
             // Same rule as Download: never throw from inside TIA's callback.
             try
@@ -889,6 +910,68 @@ namespace TiaCli.Openness
             {
                 throw refusals[0];
             }
+            finally
+            {
+                UnhookOnlinePrompts(connection, hooked);
+            }
+        }
+
+        /// <summary>
+        /// Listens for the questions a connection asks before any transfer starts - the PLC's
+        /// certificate, its login - and answers them from the plan. Download and upload need this as
+        /// much as going online: without a listener TIA drops the connection and says only that it
+        /// failed. A refusal to listen is logged, not fatal; the transfer then fails as it did before.
+        /// </summary>
+        private static OnlineConfigurationDelegate HookOnlinePrompts(ConnectionConfiguration connection,
+            string operation, TransferPlan plan, List<string> decisions, List<SessionException> refusals)
+        {
+            var answer = OnlinePromptAnswer(operation, plan, decisions, refusals);
+            try
+            {
+                connection.OnlineLegitimation += answer;
+                return answer;
+            }
+            catch (Exception ex)
+            {
+                TiaCli.Daemon.DaemonPaths.Log($"{operation}: could not listen for certificate and login prompts: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// The handler for a connection's certificate and login questions, for the calls that take one
+        /// as a parameter (fingerprints) as well as for HookOnlinePrompts.
+        /// </summary>
+        private static OnlineConfigurationDelegate OnlinePromptAnswer(string operation, TransferPlan plan,
+            List<string> decisions, List<SessionException> refusals)
+        {
+            ParseUserType(plan.PlcUserType);
+
+            // Same rule as the transfer callbacks: nothing may escape a delegate TIA runs inside its own call.
+            return c =>
+            {
+                var name = c?.GetType().Name ?? "(null)";
+                TiaCli.Daemon.DaemonPaths.Log($"{operation} connection prompt: {name} asked");
+                try
+                {
+                    AnswerOnlinePrompt(c, plan, decisions, refusals);
+                    TiaCli.Daemon.DaemonPaths.Log($"{operation} connection prompt: {name} -> answered");
+                }
+                catch (Exception ex)
+                {
+                    TiaCli.Daemon.DaemonPaths.Log($"{operation} connection prompt: {name} -> could not answer: {ex}");
+                    refusals.Add(new SessionException(WireErrorCodes.OpennessError,
+                        $"Answering the connection prompt {name} failed: {ex.Message}",
+                        "Report the prompt name and this message."));
+                }
+            };
+        }
+
+        private static void UnhookOnlinePrompts(ConnectionConfiguration connection, OnlineConfigurationDelegate answer)
+        {
+            // Also runs after the portal died mid-transfer, when this throws and would hide why.
+            if (answer == null) return;
+            try { connection.OnlineLegitimation -= answer; } catch { }
         }
 
         /// <summary>
@@ -905,6 +988,7 @@ namespace TiaCli.Openness
             // A simulated CPU has no retained state worth protecting, and the first download to a
             // fresh simulator always raises the prompts a real first download would.
             plan.Force = true;
+            plan.AcceptCertificate = true;
 
             var modes = RequireCpuItem(deviceName).GetService<DownloadProvider>()?.Configuration.Modes;
             if (modes != null && modes.Find("PLCSIM") != null)
@@ -956,6 +1040,421 @@ namespace TiaCli.Openness
             }
         }
 
+        // ---------------------------------------------------------------- online connection
+
+        /// <summary>
+        /// Takes the project online with the device - TIA's "Go online". The connection lives in the
+        /// portal, not in this call, and stays until something takes it offline or the portal closes.
+        /// The route is picked as for a download; given no route at all, a connection already
+        /// configured (by an earlier run or in the UI) is reused as it is.
+        /// </summary>
+        public OnlineResultDto GoOnline(string deviceName, TransferPlan plan)
+        {
+            var provider = RequireOnlineProvider(deviceName);
+            var configuration = provider.Configuration;
+            var decisions = new List<string>();
+            var dto = new OnlineResultDto
+            {
+                Operation = "online",
+                Device = deviceName,
+                Previous = provider.State.ToString(),
+                Decisions = decisions,
+            };
+
+            var routeGiven = plan.Mode != null || plan.PcInterface != null ||
+                             plan.Address != null || plan.TargetInterface != null;
+            // Checked here: inside TIA's callback a bad value could only be declined, not reported.
+            ParseUserType(plan.PlcUserType);
+            // Going online changes nothing on the PLC, so --force there means only this.
+            if (plan.Force) plan.AcceptCertificate = true;
+            RefuseHeadlessLogin(deviceName);
+
+            if (provider.State == OnlineState.Online && !routeGiven)
+            {
+                dto.State = dto.Previous;
+                return dto;
+            }
+
+            // Listening before the route is applied, as Siemens' sample does: whatever TIA decides about
+            // where questions go may be settled by then.
+            var refusals = new List<SessionException>();
+            var hooked = HookOnlinePrompts(configuration, "online", plan, decisions, refusals);
+            LoginWindowFiller filler = null;
+            try
+            {
+                if (routeGiven || !configuration.IsConfigured)
+                {
+                    // Not only Online: a connection left half-open (Protected, after a cancelled login)
+                    // also refuses a new route with "not permitted in online mode".
+                    if (provider.State != OnlineState.Offline)
+                    {
+                        decisions.Add($"was {provider.State}: went offline to change the connection");
+                        provider.GoOffline();
+                    }
+
+                    var target = ResolveTarget(configuration, plan, DeviceAddressFallback(deviceName), toDevice: true);
+                    var applied = target.Address != null
+                        ? configuration.ApplyConfiguration(target.Address)
+                        : configuration.ApplyConfiguration((ConfigurationTargetInterface)target.Configuration);
+                    if (!applied)
+                        throw new SessionException(WireErrorCodes.OpennessError,
+                            $"TIA would not set up the connection to {target.Display} via {target.Mode} / {target.PcInterface}.",
+                            "Try another --interface or --target; the names TIA offers are listed when one is wrong.");
+                    dto.Mode = target.Mode;
+                    dto.PcInterface = target.PcInterface;
+                    dto.TargetAddress = target.Display;
+                }
+                else
+                {
+                    decisions.Add("connection: the one already configured");
+                }
+
+                // The login for going online is asked only in TIA's own window (RefuseHeadlessLogin has
+                // kept headless portals out), so with a login given, something has to fill that window in.
+                if (!string.IsNullOrEmpty(plan.PlcPassword))
+                {
+                    var process = CurrentProcess();
+                    if (process != null)
+                        filler = new LoginWindowFiller(process.Id, RequireCpuItem(deviceName).Name,
+                            plan.PlcUser, plan.PlcPassword, plan.PlcUserType);
+                }
+
+                TiaCli.Daemon.DaemonPaths.Log($"go online: {deviceName} to {dto.TargetAddress ?? "the configured connection"}");
+                var state = provider.GoOnline();
+                TiaCli.Daemon.DaemonPaths.Log($"go online returned: {state}");
+
+                if (filler != null)
+                {
+                    filler.Dispose();
+                    if (filler.Refused != null)
+                    {
+                        try { if (provider.State != OnlineState.Offline) provider.GoOffline(); } catch { }
+                        throw new SessionException(WireErrorCodes.AccessDenied, filler.Refused,
+                            "Check the user name, password and --plc-user-type.");
+                    }
+                    if (filler.Filled)
+                        decisions.Add(string.IsNullOrEmpty(plan.PlcUser)
+                            ? "log in: filled TIA's login window"
+                            : $"log in: filled TIA's login window as '{plan.PlcUser}'");
+                }
+
+                if (refusals.Count > 0)
+                {
+                    // A half-made connection waiting on a prompt we declined helps nobody.
+                    try { if (provider.State != OnlineState.Offline) provider.GoOffline(); } catch { }
+                    throw refusals[0];
+                }
+
+                dto.State = state.ToString();
+                dto.Hint = OnlineHint(state, dto.TargetAddress);
+                return dto;
+            }
+            catch (Exception ex) when (refusals.Count > 0 && !(ex is SessionException))
+            {
+                throw refusals[0];
+            }
+            catch (EngineeringTargetInvocationException ex)
+            {
+                // A login the filler saw refused makes GoOnline fail too; the refusal is the reason.
+                filler?.Dispose();
+                if (filler?.Refused != null)
+                    throw new SessionException(WireErrorCodes.AccessDenied, filler.Refused,
+                        "Check the user name, password and --plc-user-type.");
+                throw new SessionException(WireErrorCodes.OpennessError, ex.Message,
+                    "Check that the PLC (or the PLCSIM instance) is running and reachable from the PC interface used. " +
+                    "A PLC that wants a login: give --plc-user and --plc-password, and tia fills TIA's login window.");
+            }
+            finally
+            {
+                filler?.Dispose();
+                UnhookOnlinePrompts(configuration, hooked);
+            }
+        }
+
+        /// <summary>
+        /// Refuses to go online from a headless portal to a CPU that will want a login. On V20 the
+        /// login for going online is asked only in TIA's own window - never on the connection, where a
+        /// download hears it - and a portal without a window dies trying to show it, taking the session
+        /// with it. Conservative: a protected CPU whose anonymous user may go online is refused too.
+        /// </summary>
+        private void RefuseHeadlessLogin(string deviceName)
+        {
+            var process = CurrentProcess();
+            if (process == null || process.Mode == TiaPortalMode.WithUserInterface) return;
+
+            var cpu = RequireCpuItem(deviceName);
+            string why = null;
+            try
+            {
+                var control = cpu.GetService<Siemens.Engineering.HW.Features.PlcAccessControlConfigurationProvider>();
+                if (control != null && control.PlcAccessControlConfiguration != Siemens.Engineering.HW.PlcAccessControlConfiguration.Disabled)
+                    why = $"its access control is {control.PlcAccessControlConfiguration}";
+            }
+            catch (Exception ex) { TiaCli.Daemon.DaemonPaths.Log("online: could not read access control: " + ex.Message); }
+            try
+            {
+                var level = cpu.GetService<Siemens.Engineering.HW.Features.PlcAccessLevelProvider>()?.PlcProtectionAccessLevel;
+                if (why == null && level != null &&
+                    level != Siemens.Engineering.HW.PlcProtectionAccessLevel.None &&
+                    level != Siemens.Engineering.HW.PlcProtectionAccessLevel.FullAccess &&
+                    level != Siemens.Engineering.HW.PlcProtectionAccessLevel.FullAccessIncludingFailsafe)
+                    why = $"its access level is {level}";
+            }
+            catch (Exception ex) { TiaCli.Daemon.DaemonPaths.Log("online: could not read access level: " + ex.Message); }
+
+            if (why == null) return;
+            throw new SessionException(WireErrorCodes.InvalidRequest,
+                $"Going online to '{deviceName}' needs a login ({why}), and TIA asks for that only in its " +
+                "own window - which this headless portal does not have, and dies trying to show.",
+                "Go online from a session with a window ('tia session start' without --headless) and log in " +
+                "there once. Downloads and uploads take the login headless: --plc-user, --plc-password.");
+        }
+
+        /// <summary>The --plc-user-type names. TIA's login window calls a project user a "Local user".</summary>
+        private static OnlinePrompts.UserType? ParseUserType(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return null;
+            switch (text.Trim().ToLowerInvariant())
+            {
+                case "local":
+                case "project": return OnlinePrompts.UserType.ProjectUser;
+                case "global": return OnlinePrompts.UserType.GlobalUser;
+                case "anonymous": return OnlinePrompts.UserType.AnonymousUser;
+                case "password": return OnlinePrompts.UserType.PasswordOnly;
+                case "sso": return OnlinePrompts.UserType.SingleSignOnUser;
+                default:
+                    throw new SessionException(WireErrorCodes.InvalidRequest,
+                        $"Unknown user type '{text}'.",
+                        "Use local (also: project), global, anonymous, password or sso.");
+            }
+        }
+
+        /// <summary>Takes the project offline from the device. Already offline is not an error.</summary>
+        public OnlineResultDto GoOffline(string deviceName)
+        {
+            var provider = RequireOnlineProvider(deviceName);
+            var dto = new OnlineResultDto
+            {
+                Operation = "offline",
+                Device = deviceName,
+                Previous = provider.State.ToString(),
+                Decisions = new List<string>(),
+            };
+
+            if (provider.State != OnlineState.Offline) provider.GoOffline();
+            dto.State = provider.State.ToString();
+            return dto;
+        }
+
+        /// <summary>
+        /// Reads the PLC's fingerprints - identifier/value pairs that change when what is loaded on it
+        /// changes. Read-only, and the other way to ask a PLC about itself besides going online: like a
+        /// download, the call takes the certificate and login answers itself, so it works headless and
+        /// with a protected CPU, where going online needs TIA's own login window.
+        /// </summary>
+        public FingerprintResultDto ReadFingerprints(string deviceName, TransferPlan plan)
+        {
+            RequireCpuItem(deviceName);
+            // It hangs off the portal itself: the CPU and the station both answered null on V20.
+            var provider = ((IEngineeringServiceProvider)_portal).GetService<Siemens.Engineering.FingerprintData.FingerprintDataProvider>();
+            if (provider == null)
+                throw new SessionException(WireErrorCodes.OpennessError,
+                    $"'{deviceName}' offers no fingerprint service.",
+                    "Fingerprints need an S7-1500 class CPU and TIA Portal V19 or later.");
+
+            // The call takes an address, not a target interface, so this is the upload's route.
+            var target = ResolveTarget(provider.Configuration, plan, DeviceAddressFallback(deviceName), toDevice: false);
+            var decisions = new List<string>();
+            var refusals = new List<SessionException>();
+            var answer = OnlinePromptAnswer("fingerprint", plan, decisions, refusals);
+
+            try
+            {
+                TiaCli.Daemon.DaemonPaths.Log($"fingerprint start: {deviceName} via {target.Mode} / {target.PcInterface} to {target.Display}");
+                var result = provider.GetFingerprintData(target.Address, answer);
+                if (refusals.Count > 0) throw refusals[0];
+
+                var dto = new FingerprintResultDto
+                {
+                    Device = deviceName,
+                    Mode = target.Mode,
+                    PcInterface = target.PcInterface,
+                    TargetAddress = target.Display,
+                    Decisions = decisions,
+                    Items = new List<FingerprintItemDto>(),
+                };
+                foreach (Siemens.Engineering.FingerprintData.FingerprintDataItem item in result.FingerprintDataItems)
+                    dto.Items.Add(new FingerprintItemDto { Identifier = item.FingerprintDataIdentifier, Value = item.FingerprintDataValue });
+                TiaCli.Daemon.DaemonPaths.Log($"fingerprint returned: {dto.Items.Count} item(s)");
+                return dto;
+            }
+            catch (Exception ex) when (refusals.Count > 0 && !(ex is SessionException))
+            {
+                throw refusals[0];
+            }
+            catch (EngineeringTargetInvocationException ex)
+            {
+                throw new SessionException(WireErrorCodes.OpennessError, ex.Message,
+                    "Check that the PLC is reachable at that address. A certificate or login refusal would have named itself.");
+            }
+        }
+
+        private OnlineProvider RequireOnlineProvider(string deviceName)
+        {
+            var provider = RequireCpuItem(deviceName).GetService<OnlineProvider>();
+            if (provider == null)
+                throw new SessionException(WireErrorCodes.OpennessError,
+                    $"'{deviceName}' offers no online connection.");
+            return provider;
+        }
+
+        /// <summary>
+        /// One prompt from going online. Unlike a download there is nothing destructive to ask about,
+        /// only who is connecting: passwords come from this run's flags, and an unverified certificate is
+        /// connected to only under Force, since accepting it is exactly what the prompt exists to make someone decide.
+        /// </summary>
+        private static void AnswerOnlinePrompt(OnlinePrompts.OnlineConfiguration prompt, TransferPlan plan,
+            List<string> decisions, List<SessionException> refusals)
+        {
+            switch (prompt)
+            {
+                case OnlinePrompts.TlsVerificationConfiguration tls:
+                    // What TIA's own "Connect" button does for an unknown, self-signed certificate:
+                    // connect this once, unverified. Answering Trusted instead was seen on V20 to drop
+                    // the connection a second later - a certificate that cannot be verified cannot be
+                    // marked verified-and-trusted.
+                    // Under trial: a download that heard the question and answered NonVerified still
+                    // failed to connect, so Trusted is offered as the other answer to compare.
+                    if (plan.TrustCertificate)
+                    {
+                        tls.CurrentSelection = OnlinePrompts.TlsVerificationConfigurationSelection.Trusted;
+                        decisions.Add($"trusted the certificate of {tls.PlcName} ({tls.VerificationInfo})");
+                        return;
+                    }
+                    if (plan.AcceptCertificate)
+                    {
+                        tls.CurrentSelection = OnlinePrompts.TlsVerificationConfigurationSelection.NonVerified;
+                        decisions.Add($"forced: connect to {tls.PlcName} despite its unverified certificate ({tls.VerificationInfo})");
+                        return;
+                    }
+                    tls.CurrentSelection = OnlinePrompts.TlsVerificationConfigurationSelection.NonTrusted;
+                    refusals.Add(new SessionException(WireErrorCodes.AccessDenied,
+                        $"The certificate of {tls.PlcName} is not trusted yet: {tls.VerificationInfo}",
+                        "Check it in TIA Portal, or re-run with --accept-certificate to connect anyway, as TIA's 'Connect' button does."));
+                    return;
+
+                case OnlinePrompts.OnlineAuthenticationConfiguration auth:
+                    AnswerOnlineLogin(auth, plan, decisions, refusals);
+                    return;
+
+                // Covers the read-access password of CPUs protected by access levels.
+                case OnlinePrompts.OnlinePasswordConfiguration password:
+                    if (string.IsNullOrEmpty(plan.PlcPassword))
+                    {
+                        refusals.Add(new SessionException(WireErrorCodes.AccessDenied,
+                            $"The PLC asks for a password ({prompt.GetType().Name}), and this tool holds none of its own.",
+                            "Give it for this run with --plc-password <password>."));
+                        return;
+                    }
+                    password.SetPassword(Secure(plan.PlcPassword));
+                    decisions.Add($"password for {prompt.GetType().Name}: supplied");
+                    return;
+            }
+
+            refusals.Add(new SessionException(WireErrorCodes.OpennessError,
+                $"Going online asked something this tool does not know how to answer: {prompt?.GetType().Name}.",
+                "Go online once from the TIA Portal UI, and report the prompt name."));
+        }
+
+        /// <summary>
+        /// The login of a CPU with user management. --plc-user-type says which kind; without it, a user
+        /// and password log in as a project user, a password alone is the password-only login, and
+        /// nothing at all is anonymous, where the CPU allows it.
+        /// </summary>
+        private static void AnswerOnlineLogin(OnlinePrompts.OnlineAuthenticationConfiguration auth,
+            TransferPlan plan, List<string> decisions, List<SessionException> refusals)
+        {
+            var supported = auth.GetSupportedAuthenticationTypes().Select(t => t.CurrentUserType).ToList();
+            var offered = supported.Count > 0 ? string.Join(", ", supported) : "none listed";
+            var credentials = auth.OnlineCredentials;
+            TiaCli.Daemon.DaemonPaths.Log($"online login: the PLC takes {offered}; secure: {auth.IsSecureCommunication}");
+
+            var chosen = ParseUserType(plan.PlcUserType);
+            if (chosen == OnlinePrompts.UserType.AnonymousUser || chosen == OnlinePrompts.UserType.SingleSignOnUser)
+            {
+                if (supported.Count > 0 && !supported.Contains(chosen.Value))
+                {
+                    refusals.Add(new SessionException(WireErrorCodes.AccessDenied,
+                        $"The PLC does not take a {chosen} login (it takes: {offered})."));
+                    return;
+                }
+                credentials.Type = chosen.Value;
+                decisions.Add($"log in: {chosen}");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(plan.PlcPassword))
+            {
+                if (supported.Contains(OnlinePrompts.UserType.AnonymousUser))
+                {
+                    credentials.Type = OnlinePrompts.UserType.AnonymousUser;
+                    decisions.Add("log in: anonymous");
+                    return;
+                }
+                refusals.Add(new SessionException(WireErrorCodes.AccessDenied,
+                    $"The PLC wants a login (it takes: {offered}).",
+                    "Give it for this run with --plc-user <name> --plc-password <password>, " +
+                    "or --plc-password alone for a password-only login."));
+                return;
+            }
+
+            OnlinePrompts.UserType type;
+            if (chosen.HasValue) type = chosen.Value;
+            else if (string.IsNullOrEmpty(plan.PlcUser)) type = OnlinePrompts.UserType.PasswordOnly;
+            else if (supported.Contains(OnlinePrompts.UserType.GlobalUser) &&
+                     !supported.Contains(OnlinePrompts.UserType.ProjectUser)) type = OnlinePrompts.UserType.GlobalUser;
+            else type = OnlinePrompts.UserType.ProjectUser;
+
+            if (supported.Count > 0 && !supported.Contains(type))
+            {
+                refusals.Add(new SessionException(WireErrorCodes.AccessDenied,
+                    $"The PLC does not take a {type} login (it takes: {offered}).",
+                    string.IsNullOrEmpty(plan.PlcUser) ? "Add --plc-user <name>." : "Drop --plc-user for a password-only login."));
+                return;
+            }
+
+            credentials.Type = type;
+            if (!string.IsNullOrEmpty(plan.PlcUser)) credentials.Name = plan.PlcUser;
+            credentials.SetPassword(Secure(plan.PlcPassword));
+            decisions.Add(string.IsNullOrEmpty(plan.PlcUser) ? $"log in: {type}" : $"log in: {type} '{plan.PlcUser}'");
+        }
+
+        /// <summary>What to do about a state other than Online, in the words of someone at the PLC.</summary>
+        private static string OnlineHint(OnlineState state, string target)
+        {
+            var where = string.IsNullOrEmpty(target) ? "the configured address" : target;
+            switch (state)
+            {
+                case OnlineState.Online:
+                    return null;
+                case OnlineState.NotReachable:
+                    return $"Nothing answered at {where}. Is the PLC powered, on the same subnet as the PC " +
+                           "interface, and is --interface the adapter it is cabled to?";
+                case OnlineState.Protected:
+                    return "The PLC is protected and this connection was not let in. Give --plc-password " +
+                           "(and --plc-user for a CPU with user management).";
+                case OnlineState.Incompatible:
+                    return "TIA reached the PLC but it does not match this project's device (another CPU " +
+                           "or firmware). Check the hardware configuration, or upload the station to compare.";
+                case OnlineState.Connecting:
+                case OnlineState.Disconnecting:
+                    return "TIA had not finished when it returned. Run the command again to see where it ended.";
+                default:
+                    return "The connection did not open and TIA gave no reason. 'Go online' in the TIA Portal " +
+                           "UI shows its message.";
+            }
+        }
+
         private sealed class ResolvedTarget
         {
             public string Mode;
@@ -972,15 +1471,16 @@ namespace TiaCli.Openness
         /// the names are installation-specific and this is the only way to discover them from a CLI.
         /// </summary>
         private static ResolvedTarget ResolveTarget(ConnectionConfiguration configuration,
-            TransferPlan plan, string fallbackAddress, bool forDownload)
+            TransferPlan plan, string fallbackAddress, bool toDevice)
         {
-            var mode = configuration.Modes.Find(plan.Mode);
+            var modeName = plan.Mode ?? "PN/IE";
+            var mode = configuration.Modes.Find(modeName);
             if (mode == null)
             {
                 var modes = string.Join(", ", configuration.Modes.Select(m => m.Name));
                 throw new SessionException(WireErrorCodes.NotFound,
-                    $"Connection mode '{plan.Mode}' is not available. This machine has: {modes}.",
-                    plan.Mode.Equals("PLCSIM", StringComparison.OrdinalIgnoreCase)
+                    $"Connection mode '{modeName}' is not available. This machine has: {modes}.",
+                    modeName.Equals("PLCSIM", StringComparison.OrdinalIgnoreCase)
                         ? "No PLCSIM mode means S7-PLCSIM is not installed."
                         : "Pick one with --via <mode>.");
             }
@@ -1012,12 +1512,12 @@ namespace TiaCli.Openness
 
             var address = plan.Address ?? fallbackAddress;
 
-            // A download is aimed at a target interface - the device's port as TIA names it, such as
+            // A download, like going online, is aimed at a target interface - the device's port as TIA names it, such as
             // "1 X1" - which is the route Siemens documents. An address made directly on the PC adapter
             // belongs to no target interface, and handing that to Download was seen to take TIA
             // down before it asked a single question. The address route stays for station upload, and
             // for an adapter that offers no target interfaces at all.
-            if (forDownload && pcInterface.TargetInterfaces.Count > 0)
+            if (toDevice && pcInterface.TargetInterfaces.Count > 0)
             {
                 var names = string.Join(", ", pcInterface.TargetInterfaces.Select(t => t.Name));
                 TiaCli.Daemon.DaemonPaths.Log($"target interfaces on {pcInterface.Name}: {names}");

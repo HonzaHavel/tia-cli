@@ -210,6 +210,41 @@ namespace TiaCli.Protocol
         public string UploadedStation { get; set; }
     }
 
+    /// <summary>The outcome of going online or offline with a device.</summary>
+    public sealed class OnlineResultDto
+    {
+        public string Operation { get; set; }
+        public string Device { get; set; }
+        /// <summary>Null when the connection already configured was reused.</summary>
+        public string Mode { get; set; }
+        public string PcInterface { get; set; }
+        public string TargetAddress { get; set; }
+        /// <summary>The state before the command, as TIA names it (Offline, Online, NotReachable...).</summary>
+        public string Previous { get; set; }
+        public string State { get; set; }
+        /// <summary>The prompts that were answered automatically, in plain words.</summary>
+        public List<string> Decisions { get; set; }
+        /// <summary>What to check when the state is not the one asked for.</summary>
+        public string Hint { get; set; }
+    }
+
+    /// <summary>A PLC's fingerprints, read without going online.</summary>
+    public sealed class FingerprintResultDto
+    {
+        public string Device { get; set; }
+        public string Mode { get; set; }
+        public string PcInterface { get; set; }
+        public string TargetAddress { get; set; }
+        public List<string> Decisions { get; set; }
+        public List<FingerprintItemDto> Items { get; set; }
+    }
+
+    public sealed class FingerprintItemDto
+    {
+        public string Identifier { get; set; }
+        public string Value { get; set; }
+    }
+
     public sealed class CompileResultDto
     {
         public string State { get; set; }
