@@ -168,7 +168,8 @@ tia catalog "1516-3" --json               # order numbers / type identifiers (--
 tia device add "OrderNumber:6ES7 516-3AN02-0AB0/V2.9" PLC_2    # --device-name <n>
 tia device ip <dev> --address 192.168.0.10 --mask 255.255.255.0 --subnet PN_1   # --router <ip> | --no-router
 tia device set <dev> <attribute> <value>  # names come from device attrs; they differ by TIA version
-tia hw export line.aml                    # hardware as CAx/AutomationML; --device <dev> for one station
+tia hw export line.aml                    # hardware as CAx/AutomationML, normalized for git; --device <dev> for one station, --raw for TIA's own file
+tia hw export hardware.yaml --yaml        # the short YAML: stations, modules by slot, I/O addresses, network; no settings yet
 tia hw import line.aml                    # --existing retain (default) | overwrite | park
 ```
 

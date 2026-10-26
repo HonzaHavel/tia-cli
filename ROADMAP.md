@@ -139,6 +139,14 @@ Decided (2026-10-20):
 - To prove the YAML is enough: export a real project to YAML, build an empty project from it, and
   compare the hardware with the original (`Device.CompareTo`, plus CAx export of both).
 
+Built (2026-10-26): **export**, as `tia hw export <file> --yaml`, drawn from the CAx export
+(`HardwareYaml`). It writes the always-written fields above and no settings. Next, in order:
+
+1. Settings: learn each module type's defaults (plug a fresh one into a scratch project, per TIA
+   version), then write only what differs - which also brings back what CAx loses (F-capability,
+   DCP).
+2. **create**: YAML → empty project, then **apply**: YAML → existing project.
+
 How YAML gets into a project - Openness calls (add device, plug modules, set attributes, connect
 subnets) or generated AML through `hw import` - is open; Openness calls give per-item errors and
 the same defaults as plugging by hand.
@@ -167,8 +175,28 @@ Decided (2026-10-20):
 - The protection password (confidential configuration data) is not checked yet: the probe project
   never had one. A rebuild of a protected CPU will at least need `device protection` again.
 
-Still to run: the probe on a real project with distributed I/O, and a protected CPU. If it holds,
-`hw export` should write normalized AML so git only shows real changes.
+Run on a real line (2026-10-26, Foodtec: CPU 1515F-2 PN V4.0, ET200MP, 3 × IM 155-6 PN HF V6.2,
+ATV320 drives over GSD, 256 I/O tags, access control on, confidential-data password set): export,
+import into an empty project of the same name, export again.
+
+- Two exports are identical once normalized; `hw export` now normalizes (IDs from each element's
+  path, so a rebuild of the same name gets the same IDs). Every element, channel, tag and link came
+  back.
+- **I/O tags are linked to their channels by ID** (`InternalLink` channel → tag), and each tag also
+  carries its address. Whether a file without tags still imports and the CSV tags reattach by
+  address is still to probe.
+- **Lost on the way, to be set again after an import:**
+  - `Failsafe_FCapabilityActivated` is not in the file at all: an F-CPU with F off came back with
+    F on (and with the F-monitoring defaults that come with it).
+  - IM 155-6 PN HF V6.2: `DCPReadOnlyActive` is refused on import ("not supported for plugged
+    modules with firmware V6.2"), and `DCPSynchronizeActive` came back True instead of False.
+  - The confidential-configuration password and with it the PLC communication certificate: the
+    rebuild does not compile until `device protection --secret` and a certificate are set again.
+- Noise, not hardware: comments gain the new project's language (`en-US` next to `en-GB`), and
+  a few defaults are written out once set (server module startup comparison, F-monitoring times).
+- So CAx alone is not enough for a rebuild; whatever builds from `hardware.yaml` sets these after
+  the import. Next probes: what `--existing overwrite` does to an unchanged station, and whether
+  the YAML is better applied by Openness calls than by generated AML.
 
 ## 4. Build a project from `source/`
 

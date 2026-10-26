@@ -165,7 +165,7 @@ namespace TiaCli.Openness
                     p.RequiredString("archive"), p.RequiredString("directory"), p.Bool("upgrade", false));
 
                 case "hardware.export": return _session.ExportHardware(
-                    p.RequiredString("path"), p.String("device"));
+                    p.RequiredString("path"), p.String("device"), p.Bool("raw", false), p.Bool("yaml", false));
                 case "hardware.import": return _session.ImportHardware(
                     p.RequiredString("path"), p.String("existing"));
 

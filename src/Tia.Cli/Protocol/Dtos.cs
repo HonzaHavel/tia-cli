@@ -69,6 +69,10 @@ namespace TiaCli.Protocol
         public long Bytes { get; set; }
         /// <summary>The one station exported; null when it was the whole project.</summary>
         public string Device { get; set; }
+        /// <summary>Export only: IDs, file name and time made stable (CaxAml); false with --raw.</summary>
+        public bool Normalized { get; set; }
+        /// <summary>Export only: the file is hardware.yaml drawn from the CAx export (HardwareYaml).</summary>
+        public bool Yaml { get; set; }
         public string State { get; set; }
         public int ErrorCount { get; set; }
         public int WarningCount { get; set; }

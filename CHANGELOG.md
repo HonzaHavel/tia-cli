@@ -31,6 +31,24 @@ listened, so those downloads failed with nothing but "Connect to module failed".
   headless too; `--plc-user-type` picks local (TIA's "Local user", the default with a user name),
   global, anonymous, password or sso.
 
+**`tia hw export <file> --yaml`: the hardware as a short YAML.** The first direction of
+`source/hardware.yaml` (see the roadmap): project → YAML, drawn from the CAx export. One file for
+the whole project - subnets, IO systems, and per station its GSD file, folder, rack, the modules by
+slot (name, order number or GSD module, firmware, I and Q start addresses) and each interface's IP
+address, router, subnet and IO system. Foodtec's 20 stations fit in 226 lines. Settings that differ
+from a module's defaults are not written yet, and nothing reads the file back yet.
+
+**`tia hw export` writes a file git can diff.** TIA gives every element a fresh ID on every export,
+and stamps the file's name and the time of writing, so two exports of the same hardware shared
+almost no lines. Now each ID is derived from the element's path (its kind and name, and those above
+it), the name and time are blanked, and a module's `InstallationDate` - when it was plugged into
+this project, not a setting - is left out. Two exports of the same project are the same file, and
+adding a module changes only that module's lines. Links are rewritten with their elements.
+`--raw` keeps TIA's file as written.
+
+- Tried on a real line (S7-1515F, ET200MP and ET200SP, drives, 256 I/O tags): two exports are
+  byte for byte the same, and a rebuild imported from the file differs only where the hardware did.
+
 **`tia fingerprint <station>`** reads the PLC's fingerprints without going online. Read-only. It
 reaches the PLC, then hangs headless on V20 - see the roadmap.
 

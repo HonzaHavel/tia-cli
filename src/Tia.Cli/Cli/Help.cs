@@ -110,6 +110,10 @@ HARDWARE
   device add <type> <name> Add a station from a type identifier    [--device-name <n>]
   hw export <file>         Export the hardware configuration as CAx data (AutomationML)
                                  [--device <station>] one station instead of the whole project
+                                 IDs follow each element's path, file name and time are blanked,
+                                 so the file only changes with the hardware. [--raw] keeps TIA's own
+                                 [--yaml] writes the short hardware.yaml instead: names, types,
+                                 firmware, slots, I/O addresses, network. Settings are not in it yet
   hw import <file>         Import CAx data into the open project
                                  [--existing retain|overwrite|park] for a device already there:
                                  keep it (default), replace it, or move it to the parking lot

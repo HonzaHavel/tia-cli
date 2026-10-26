@@ -322,7 +322,7 @@ Run `tia help` for the full text.
 | `tia devices` | Stations, their CPUs and addresses |
 | `tia catalog <filter>` | Search the hardware catalog for order numbers (`--limit <n>`, default 50) |
 | `tia device add <type> <name>` | Add a station from a type identifier (`--device-name <n>` for the device item) |
-| `tia hw export <file>` | Export the hardware configuration as CAx data (AutomationML). `--device <station>` for one station |
+| `tia hw export <file>` | Export the hardware configuration as CAx data (AutomationML), normalized so the file only changes with the hardware. `--device <station>` for one station, `--raw` for TIA's file as written, `--yaml` for the short hardware.yaml (names, types, firmware, slots, I/O addresses, network; no settings yet) |
 | `tia hw import <file>` | Import CAx data. `--existing retain\|overwrite\|park` decides what happens to a device already there (default retain) |
 | `tia device ip <station>` | `--address <ip> --mask <netmask>`, `--subnet <name>` for the TIA subnet, gateway with `--router <ip>` / `--no-router` |
 | `tia device attrs <station>` | List the Openness attributes of the CPU (`--filter <text>`) |

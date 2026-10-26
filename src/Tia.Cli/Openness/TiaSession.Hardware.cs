@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using Siemens.Engineering;
 using Siemens.Engineering.Cax;
 using TiaCli.Protocol;
@@ -16,11 +17,12 @@ namespace TiaCli.Openness
     /// </summary>
     internal sealed partial class TiaSession
     {
-        public CaxResultDto ExportHardware(string targetPath, string deviceName)
+        public CaxResultDto ExportHardware(string targetPath, string deviceName, bool raw, bool yaml)
         {
             var project = RequireProject();
             var cax = RequireCax(project);
-            var file = Fresh(targetPath);
+            // YAML is drawn from a CAx export; that one goes to a scratch file and is not kept.
+            var file = yaml ? ScratchFile("hardware.aml") : Fresh(targetPath);
 
             TransferResult result;
             if (string.IsNullOrEmpty(deviceName))
@@ -33,9 +35,41 @@ namespace TiaCli.Openness
             }
 
             file.Refresh();
+            if (yaml)
+            {
+                var target = Fresh(targetPath);
+                if (file.Exists)
+                {
+                    File.WriteAllText(target.FullName, HardwareYaml.FromAml(File.ReadAllText(file.FullName)),
+                        new UTF8Encoding(false));
+                    file.Delete();
+                    target.Refresh();
+                }
+                var described = Describe(result, "export", target);
+                described.Device = string.IsNullOrEmpty(deviceName) ? null : deviceName;
+                described.Yaml = true;
+                return described;
+            }
+
+            var normalized = !raw && file.Exists;
+            if (normalized)
+            {
+                Normalize(file);
+                file.Refresh();
+            }
             var dto = Describe(result, "export", file);
             dto.Device = string.IsNullOrEmpty(deviceName) ? null : deviceName;
+            dto.Normalized = normalized;
             return dto;
+        }
+
+        /// <summary>Rewrites an export in place so it only changes when the hardware does; see CaxAml.</summary>
+        private static void Normalize(FileInfo file)
+        {
+            var bytes = File.ReadAllBytes(file.FullName);
+            var bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
+            var text = File.ReadAllText(file.FullName);
+            File.WriteAllText(file.FullName, CaxAml.Normalize(text), new UTF8Encoding(bom));
         }
 
         public CaxResultDto ImportHardware(string filePath, string existing)

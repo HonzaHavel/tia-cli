@@ -417,9 +417,11 @@ namespace TiaCli.Cli
             {
                 path = Path.GetFullPath(cmd.Positional(0, "file")),
                 device = cmd.Value("device"),
+                raw = cmd.Has("raw"),
+                yaml = cmd.Has("yaml"),
             });
             return RenderCax(result, output, cax =>
-                $"{cax.Device ?? "Hardware"} -> {cax.FilePath} ({cax.Bytes:n0} bytes)");
+                $"{cax.Device ?? "Hardware"} -> {cax.FilePath} ({cax.Bytes:n0} bytes{(cax.Yaml ? ", yaml" : cax.Normalized ? ", normalized" : "")})");
         }
 
         private static int HardwareImport(CommandLine cmd, IExecutor executor, Output output)
