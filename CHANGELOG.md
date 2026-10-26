@@ -52,6 +52,19 @@ adding a module changes only that module's lines. Links are rewritten with their
 **`tia fingerprint <station>`** reads the PLC's fingerprints without going online. Read-only. It
 reaches the PLC, then hangs headless on V20 - see the roadmap.
 
+**Tag tables as TIA's own XML.** The CSV carries tags in one language; the Openness XML TIA Portal
+exports carries the user constants and the comments in every language too, and is what
+repositories that keep tag tables next to their SCL already hold.
+
+- `table export --xml` and `tables export --xml` write tag tables as XML; an `--out` ending `.xml`
+  does the same for one table. The export is made with defaults (`ExportSetting` `WithDefaults`),
+  so attributes at their default value, such as the HMI flags, are in the file too. Its creation
+  stamp is dropped, as it is for blocks, so an unchanged table exports to the same bytes.
+- `table import`, `tables import` and `tia sync` take `.xml` tag tables as well as `.csv`. The XML
+  replaces the table it names - tags, constants and comments - in the folder TIA has it in, or in
+  `--folder` (or the file's folder) when the table is new. `--name` does not apply: the name is in
+  the file.
+
 ### Fixed
 
 - Downloads and uploads to a PLC with a certificate no longer fail with "Connect to module failed".
