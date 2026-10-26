@@ -3,7 +3,10 @@
 Notable changes to tia-cli. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## 0.4.7 — 2026-10-26
+
+Everything since 0.4.2. Versions 0.4.3 to 0.4.6 were test builds for the work machine and were
+never released; from here on, test builds are named `-dev.N` after the release they lead to.
 
 ### Added
 
